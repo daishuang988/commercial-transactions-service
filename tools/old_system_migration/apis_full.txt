@@ -1,0 +1,21 @@
+# 全量爬取 - 主数据
+https://api.srdsmgs.com/app/admin/user/select
+https://api.srdsmgs.com/app/admin/good/select
+https://api.srdsmgs.com/app/admin/category/select
+https://api.srdsmgs.com/app/admin/merchandise/select
+https://api.srdsmgs.com/app/admin/order/select
+https://api.srdsmgs.com/app/admin/exchange/select
+https://api.srdsmgs.com/app/admin/withdraw/select
+https://api.srdsmgs.com/app/admin/coupon-log/select
+https://api.srdsmgs.com/app/admin/selfbonus-log/select
+https://api.srdsmgs.com/app/admin/sharebonus-log/select
+https://api.srdsmgs.com/app/admin/admin/select
+https://api.srdsmgs.com/app/admin/role/select
+https://api.srdsmgs.com/app/admin/rule/select
+https://api.srdsmgs.com/app/admin/banner/select
+https://api.srdsmgs.com/app/admin/ad/select
+# 配置
+https://api.srdsmgs.com/app/admin/config/get
+https://api.srdsmgs.com/app/admin/rule/get
+https://api.srdsmgs.com/app/admin/rule/permission
+https://api.srdsmgs.com/app/admin/account/info

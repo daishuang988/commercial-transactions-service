@@ -1,0 +1,24 @@
+# 二进制
+server.exe
+*.exe
+*.test
+
+# IDE
+.idea/
+.vscode/
+
+# 上传文件
+upload/
+
+# 日志
+*.log
+
+# 临时工具
+tools/loadtest/flash_sale_bench.exe
+
+# 环境变量（如果有）
+.env
+server.exe~
+dump.rdb
+output/
+.claude/

@@ -1,0 +1,6 @@
+# 重新爬日志表（午夜结算后）
+https://api.srdsmgs.com/app/admin/coupon-log/select
+https://api.srdsmgs.com/app/admin/selfbonus-log/select
+https://api.srdsmgs.com/app/admin/sharebonus-log/select
+# 用户表也重新爬（today 字段已被午夜重置，yesterday_sell_count 也已更新）
+https://api.srdsmgs.com/app/admin/user/select

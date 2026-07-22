@@ -1,0 +1,3 @@
+https://api.srdsmgs.com/app/admin/coupon-log/select
+https://api.srdsmgs.com/app/admin/selfbonus-log/select
+https://api.srdsmgs.com/app/admin/sharebonus-log/select

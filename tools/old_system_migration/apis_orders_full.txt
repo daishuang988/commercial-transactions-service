@@ -1,0 +1,6 @@
+# 待付款
+https://api.srdsmgs.com/app/admin/order/select?status=0
+# 已支付
+https://api.srdsmgs.com/app/admin/order/select?status=1
+# 已完成(默认)
+https://api.srdsmgs.com/app/admin/order/select

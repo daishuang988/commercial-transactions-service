@@ -1,0 +1,30 @@
+server:
+  port: 8080
+  mode: debug  # 生产环境改成 release
+
+mysql:
+  host: 127.0.0.1
+  port: 3306
+  user: root
+  password: root
+  database: flash_sale
+  charset: utf8mb4
+  max_open_conns: 200   # 连接池上限
+  max_idle_conns: 50    # 空闲保留
+
+redis:
+  host: 127.0.0.1
+  port: 6379
+  password: ""
+  db: 0
+  pool_size: 500        # 秒杀高并发
+
+jwt:
+  secret: "flash-sale-secret-key-change-in-production"
+  expire_hours: 2
+
+flash_sale:
+  max_per_user: 1
+  worker_count: 10
+  batch_size: 200           # 批量写入条数
+  batch_interval_ms: 500    # 写入间隔(毫秒)
