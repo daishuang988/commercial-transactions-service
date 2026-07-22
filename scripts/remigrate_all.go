@@ -16,8 +16,12 @@ var db *sql.DB
 var dataDir = "./tools/old_system_migration/output/data"
 
 func main() {
+	dsn := os.Getenv("MYSQL_DSN")
+	if dsn == "" {
+		dsn = "root:root@tcp(127.0.0.1:3306)/flash_sale?charset=utf8mb4&parseTime=true&loc=Local"
+	}
 	var err error
-	db, err = sql.Open("mysql", "root:root@tcp(127.0.0.1:3306)/flash_sale?charset=utf8mb4&parseTime=true&loc=Local")
+	db, err = sql.Open("mysql", dsn)
 	if err != nil {
 		panic(err)
 	}

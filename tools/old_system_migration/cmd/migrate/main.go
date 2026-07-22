@@ -15,7 +15,12 @@ import (
 )
 
 var dataDir = "./output/data"
-var dsn = "root:root@tcp(127.0.0.1:3306)/flash_sale?charset=utf8mb4&parseTime=true&loc=Local"
+var dsn = os.Getenv("MYSQL_DSN")
+func init() {
+	if dsn == "" {
+		dsn = "root:root@tcp(127.0.0.1:3306)/flash_sale?charset=utf8mb4&parseTime=true&loc=Local"
+	}
+}
 
 func main() {
 	db, err := sql.Open("mysql", dsn)
