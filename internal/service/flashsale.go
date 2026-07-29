@@ -106,6 +106,87 @@ func StartOrderWorker(ctx context.Context, workerCount int, batchSize int, inter
 	}
 }
 
+// StartEventStatusUpdater 定时更新秒杀活动状态
+func StartEventStatusUpdater(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done(): return
+			case <-ticker.C:
+				now := time.Now().In(repository.CSTLocation())
+				// 进行中→已结束
+				repository.DB.Exec(
+					"UPDATE flash_sale_events SET status=2 WHERE status=1 AND end_time <= ?", now)
+				// 未开始→进行中
+				repository.DB.Exec(
+					"UPDATE flash_sale_events SET status=1 WHERE status=0 AND start_time <= ?", now)
+			}
+		}
+	}()
+}
+
+// StartDailyCouponSettlement 凌晨结算优惠券（抢单奖励）
+func StartDailyCouponSettlement(ctx context.Context) {
+	go func() {
+		lastRun := ""
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				today := time.Now().In(repository.CSTLocation()).Format("20060102")
+				if today == lastRun {
+					continue
+				}
+				hour, min := time.Now().In(repository.CSTLocation()).Hour(), time.Now().In(repository.CSTLocation()).Minute()
+				if hour != 23 || min < 59 {
+					continue
+				}
+				lastRun = today
+				log.Printf("开始凌晨优惠券结算...")
+				SettleDailyCoupons()
+				log.Printf("凌晨优惠券结算完成")
+			}
+		}
+	}()
+}
+
+func SettleDailyCoupons() {
+	orderRewardRate := parseConfigRate("order_reward_rate")
+	if orderRewardRate <= 0 { return }
+
+	var orders []model.Order
+	repository.DB.Where("status = 2 AND coupon_settled = 0").Find(&orders)
+	for _, o := range orders {
+		coupon := o.TotalMoney * orderRewardRate
+		if coupon <= 0 { continue }
+		before := getWalletBal(o.BuyerID, "coupon")
+		after := before + coupon
+		repository.DB.Exec("INSERT INTO coupon_logs (user_id,type,money,`before`,`after`,memo,created_at,updated_at) VALUES(?,1,?,?,?,?,NOW(),NOW())",
+			o.BuyerID, coupon, before, after, "今日收益")
+		repository.DB.Exec("UPDATE user_wallets SET coupon = ?, updated_at = NOW() WHERE user_id = ?", after, o.BuyerID)
+		repository.DB.Model(&o).Update("coupon_settled", int8(1))
+	}
+}
+
+func getWalletBal(userID int64, field string) float64 {
+	var v float64
+	repository.DB.Raw("SELECT COALESCE("+field+",0) FROM user_wallets WHERE user_id = ?", userID).Scan(&v)
+	return v
+}
+
+func parseConfigRate(key string) float64 {
+	s := repository.GetConfigStr(key)
+	if s == "" { return 0 }
+	var v float64
+	fmt.Sscanf(s, "%f", &v)
+	return v
+}
+
 func memoryWorker(ctx context.Context, id int, batchSize int, intervalMs int) {
 	ch := repository.MemStore.OrderChan()
 	ticker := time.NewTicker(time.Duration(intervalMs) * time.Millisecond)

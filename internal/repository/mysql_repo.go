@@ -43,20 +43,8 @@ func CreateUser(u *model.User) error {
 }
 
 func GetUserWallet(userID int64) (*model.UserWallet, error) {
-	// 从日志表取最新余额（与管理端一致）
-	subCoupon := "(SELECT `after` FROM coupon_logs WHERE user_id = ? ORDER BY id DESC LIMIT 1)"
-	subSelf := "(SELECT `after` FROM self_bonus_logs WHERE user_id = ? ORDER BY id DESC LIMIT 1)"
-	subShare := "(SELECT `after` FROM share_bonus_logs WHERE user_id = ? ORDER BY id DESC LIMIT 1)"
-
 	var w model.UserWallet
-	err := DB.Raw(`
-		SELECT COALESCE((`+subCoupon+`), w.coupon, 0) as coupon,
-		       COALESCE((`+subSelf+`), w.self_bonus, 0) as self_bonus,
-		       COALESCE((`+subShare+`), w.share_bonus, 0) as share_bonus,
-		       COALESCE(w.money,0) as money, COALESCE(w.score,0) as score, COALESCE(w.poor,0) as poor,
-		       w.user_id, w.updated_at
-		FROM user_wallets w WHERE w.user_id = ?`,
-		userID, userID, userID, userID).Scan(&w).Error
+	err := DB.Where("user_id = ?", userID).First(&w).Error
 	if err != nil {
 		return nil, err
 	}
@@ -77,29 +65,25 @@ func ListUsers(req model.UserListReq) ([]UserWithWallet, int64, error) {
 	var users []UserWithWallet
 	var count int64
 
-	// 资金字段从日志表实时取最新余额（和老系统前端一致）
-	subCoupon := "(SELECT cl.`after` FROM coupon_logs cl WHERE cl.user_id = u.id ORDER BY cl.id DESC LIMIT 1)"
-	subSelf := "(SELECT sl.`after` FROM self_bonus_logs sl WHERE sl.user_id = u.id ORDER BY sl.id DESC LIMIT 1)"
-	subShare := "(SELECT shl.`after` FROM share_bonus_logs shl WHERE shl.user_id = u.id ORDER BY shl.id DESC LIMIT 1)"
-
+	// 资金字段从 user_wallets 直读
 	// 今日/昨日买卖从订单表实时算
-	subTodayBuy := "(SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.buyer_id = u.id AND DATE(o.buy_time) = CURDATE())"
-	subTodayBuyCnt := "(SELECT COUNT(*) FROM orders o WHERE o.buyer_id = u.id AND DATE(o.buy_time) = CURDATE())"
-	subTodaySell := "(SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.seller_id = u.id AND DATE(o.buy_time) = CURDATE())"
-	subYestSellCnt := "(SELECT COUNT(*) FROM orders o WHERE o.seller_id = u.id AND DATE(o.buy_time) = DATE_SUB(CURDATE(), INTERVAL 1 DAY))"
+	subTodayBuy := "(SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.buyer_id = u.id AND o.status = 2 AND DATE(o.confirm_time) = CURDATE())"
+	subTodayBuyCnt := "(SELECT COUNT(*) FROM orders o WHERE o.buyer_id = u.id AND o.status = 2 AND DATE(o.confirm_time) = CURDATE())"
+	subTodaySell := "(SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.seller_id = u.id AND o.status = 2 AND DATE(o.confirm_time) = CURDATE())"
+	subYestSellCnt := "(SELECT COUNT(*) FROM orders o WHERE o.seller_id = u.id AND o.status = 2 AND DATE(o.confirm_time) = DATE_SUB(CURDATE(), INTERVAL 1 DAY))"
 
 	selectSQL := fmt.Sprintf(`u.*,
 		COALESCE(w.money,0) money,
-		COALESCE((%s), w.coupon, 0) coupon,
-		COALESCE((%s), w.self_bonus, 0) self_bonus,
-		COALESCE((%s), w.share_bonus, 0) share_bonus,
+		COALESCE(w.coupon, 0) coupon,
+		COALESCE(w.self_bonus, 0) self_bonus,
+		COALESCE(w.share_bonus, 0) share_bonus,
 		COALESCE(w.score,0) score,
 		COALESCE(w.poor,0) poor,
 		COALESCE((%s), u.today_buy_total) today_buy_total,
 		COALESCE((%s), u.today_buy_count) today_buy_count,
 		COALESCE((%s), u.today_sell_total) today_sell_total,
 		COALESCE((%s), u.yesterday_sell_count) yesterday_sell_count`,
-		subCoupon, subSelf, subShare, subTodayBuy, subTodayBuyCnt, subTodaySell, subYestSellCnt)
+		subTodayBuy, subTodayBuyCnt, subTodaySell, subYestSellCnt)
 
 	db := DB.Table("users u").
 		Select(selectSQL).
@@ -148,7 +132,7 @@ func ListUsers(req model.UserListReq) ([]UserWithWallet, int64, error) {
 func ListOrders(req model.OrderListReq) ([]model.Order, int64, error) {
 	var orders []model.Order
 	var count int64
-	db := DB.Model(&model.Order{})
+	db := DB.Model(&model.Order{}).Where("is_show = 1")
 	if req.Status != nil {
 		db = db.Where("status = ?", *req.Status)
 	}
@@ -171,13 +155,21 @@ type OrderDetail struct {
 	model.Order
 	MerchandiseTitle string `json:"merchandise_title"`
 	MerchandiseImage string `json:"merchandise_image"`
+	BuyerName        string `json:"buyer_name"`
+	BuyerPhone       string `json:"buyer_phone"`
+	SellerName       string `json:"seller_name"`
+	SellerPhone      string `json:"seller_phone"`
+		BuyerAvatar      string `json:"buyer_avatar"`
+		SellerAvatar     string `json:"seller_avatar"`
 }
 
 func GetOrderByID(id int64) (*OrderDetail, error) {
 	var o OrderDetail
 	err := DB.Table("orders o").
-		Select("o.*, m.title as merchandise_title, m.image as merchandise_image").
+		Select("o.*, m.title as merchandise_title, m.image as merchandise_image, bu.nickname as buyer_name, bu.mobile as buyer_phone, su.nickname as seller_name, su.mobile as seller_phone").
 		Joins("LEFT JOIN merchandises m ON o.merchandise_id = m.id").
+			Joins("LEFT JOIN users bu ON o.buyer_id = bu.id").
+			Joins("LEFT JOIN users su ON o.seller_id = su.id").
 		Where("o.id = ?", id).First(&o).Error
 	return &o, err
 }

@@ -22,3 +22,7 @@ server.exe~
 dump.rdb
 output/
 .claude/
+
+# 老系统迁移数据(超大文件)
+tools/old_system_migration/output/
+tools/old_system_migration/output_new/

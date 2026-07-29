@@ -18,6 +18,7 @@ const (
 	ErrCodeTokenExpired      = 1005 // Token 过期
 	ErrCodeTokenInvalid      = 1006 // Token 无效
 	ErrCodeOldPasswordWrong  = 1007 // 原密码错误
+	ErrCodeContractUnsigned  = 1008 // 未签署合同
 
 	ErrCodeStockNotEnough    = 2001 // 库存不足
 	ErrCodeSoldOut           = 2002 // 已售罄
@@ -43,6 +44,7 @@ var errMsgMap = map[int]string{
 	ErrCodeTokenExpired:      "登录已过期",
 	ErrCodeTokenInvalid:      "Token无效",
 	ErrCodeOldPasswordWrong:  "原密码错误",
+	ErrCodeContractUnsigned:  "请签署平台用户合同",
 	ErrCodeStockNotEnough:    "库存不足",
 	ErrCodeSoldOut:           "已售罄",
 	ErrCodeLimitExceeded:     "超出限购数量",

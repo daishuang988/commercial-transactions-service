@@ -28,8 +28,12 @@ func Login(c *gin.Context) {
 		return
 	}
 	u, err := repository.GetUserByUsername(req.Username)
-	if err != nil || u.Status == 0 {
-		app.Fail(c, app.ErrCodeUserNotFound, "账号不存在或已冻结")
+	if err != nil {
+		app.Fail(c, app.ErrCodeUserNotFound, "账号不存在")
+		return
+	}
+	if u.Status == 0 {
+		app.Fail(c, app.ErrCodeUserFrozen, "账号已冻结，请联系管理员")
 		return
 	}
 	// 支持两种密码格式：老系统 MD5(密码+盐) 或新系统 bcrypt
@@ -43,7 +47,9 @@ func Login(c *gin.Context) {
 		app.Fail(c, app.ErrCodePasswordWrong, "密码错误")
 		return
 	}
-	token, err := middleware.GenerateToken(u.ID, u.Username, false, Cfg.JWT.ExpireHours)
+	tokenVer := utils.RandStr(16)
+	repository.DB.Model(&model.User{}).Where("id = ?", u.ID).Update("token", tokenVer)
+	token, err := middleware.GenerateToken(u.ID, u.Username, false, Cfg.JWT.ExpireHours, tokenVer)
 	if err != nil {
 		app.InternalError(c, "生成Token失败")
 		return
@@ -146,19 +152,10 @@ func Captcha(c *gin.Context) {
 // SendSMS 发送短信验证码 POST /api/v1/front/sms/send
 func SendSMS(c *gin.Context) {
 	var req struct {
-		Mobile      string `json:"mobile" binding:"required"`
-		CaptchaID   string `json:"captcha_id" binding:"required"`
-		CaptchaCode string `json:"captcha_code" binding:"required"`
+		Mobile string `json:"mobile" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		app.BadRequest(c, "参数错误")
-		return
-	}
-
-	// 验证图形验证码
-	ans, ok := captchaStore.LoadAndDelete(req.CaptchaID)
-	if !ok || ans.(string) != req.CaptchaCode {
-		app.BadRequest(c, "图形验证码错误或已过期")
 		return
 	}
 
@@ -171,15 +168,16 @@ func SendSMS(c *gin.Context) {
 		}
 	}
 
-	// 生成6位数字验证码
-	code := fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
+	if repository.GetConfigInt("sms_verify", 0) == 1 {
+		// TODO: 接入真实接码平台
+		app.InternalError(c, "短信服务未接入")
+		return
+	}
+	code := "1234"
 	smsStore.Store(req.Mobile, smsRecord{Code: code, Expire: time.Now().Add(5 * time.Minute)})
-
-	// TODO: 接入真实短信网关，生产环境去掉 code 返回
-	fmt.Printf("[SMS] 手机号=%s 验证码=%s\n", req.Mobile, code)
-
 	app.OK(c, gin.H{"msg": "验证码已发送", "code": code, "expire": "5分钟"})
 }
+
 
 // RegisterReqV2 注册请求
 type RegisterReqV2 struct {
@@ -198,10 +196,12 @@ func RegisterV2(c *gin.Context) {
 		return
 	}
 
-	// 验证短信验证码（Mock: 暂写死 1234）
-	if req.SmsCode != "1234" {
-		app.BadRequest(c, "验证码错误")
-		return
+	// 短信校验开关: 0=关闭(跳过验证) 1=开启(需验证码1234)
+	if repository.GetConfigInt("sms_verify", 0) == 1 {
+		if req.SmsCode != "1234" {
+			app.BadRequest(c, "验证码错误")
+			return
+		}
 	}
 
 	// 检查手机号是否已注册
@@ -270,10 +270,12 @@ func ResetPassword(c *gin.Context) {
 		return
 	}
 
-	// 验证短信验证码（Mock: 暂写死 1234）
-	if req.SmsCode != "1234" {
-		app.BadRequest(c, "验证码错误")
-		return
+	// 短信校验开关
+	if repository.GetConfigInt("sms_verify", 0) == 1 {
+		if req.SmsCode != "1234" {
+			app.BadRequest(c, "验证码错误")
+			return
+		}
 	}
 
 	// 查找用户
@@ -298,15 +300,19 @@ func ResetPassword(c *gin.Context) {
 func Profile(c *gin.Context) {
 	uid := c.GetInt64("user_id")
 	u, _ := repository.GetUserByID(uid)
-	w, _ := repository.GetUserWallet(uid)
 	if u == nil {
 		app.NotFound(c, "用户不存在")
 		return
 	}
-	app.OK(c, gin.H{
-		"user":   u,
-		"wallet": w,
-	})
+	// 检查合同签署状态，未签不返回钱包数据
+	var contractPath string
+	repository.DB.Table("user_contracts").Select("contract_path").Where("user_id=? AND contract_path IS NOT NULL AND contract_path != ''", uid).Order("id DESC").Scan(&contractPath)
+	if contractPath != "" {
+		w, _ := repository.GetUserWallet(uid)
+		app.OK(c, gin.H{"user": u, "wallet": w, "contract_signed": true})
+	} else {
+		app.OK(c, gin.H{"user": u, "contract_signed": false})
+	}
 }
 
 // Wallet 钱包 GET /api/v1/front/user/wallet
@@ -317,7 +323,16 @@ func Wallet(c *gin.Context) {
 		app.NotFound(c, "钱包不存在")
 		return
 	}
-	app.OK(c, w)
+	app.OK(c, gin.H{
+		"money":                    w.Money,
+		"coupon":                   w.Coupon,
+		"self_bonus":               w.SelfBonus,
+		"share_bonus":              w.ShareBonus,
+		"score":                    w.Score,
+		"poor":                     w.Poor,
+		"coupon_withdraw_enable":   repository.GetConfigInt("coupon_withdraw_enable", 0),
+		"referral_withdraw_enable": repository.GetConfigInt("referral_withdraw_enable", 0),
+	})
 }
 
 // ChangePassword 修改密码 PUT /api/v1/front/user/password

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -40,6 +41,8 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	service.StartOrderWorker(ctx, cfg.FlashSale.WorkerCount, cfg.FlashSale.BatchSize, cfg.FlashSale.BatchIntervalMs)
+		service.StartEventStatusUpdater(ctx)
+		service.StartDailyCouponSettlement(ctx)
 
 	gin.SetMode(cfg.Server.Mode)
 	r := gin.New()
@@ -56,8 +59,15 @@ func main() {
 		}
 	})
 
-	// 静态文件（上传的图片等）
-	r.Static("/upload", "./upload")
+	// 静态文件（上传的图片等），本地没有的用占位图
+	r.GET("/upload/*filepath", func(c *gin.Context) {
+		p := filepath.Join(".", c.Request.URL.Path)
+		if _, err := os.Stat(p); err == nil {
+			c.File(p)
+		} else {
+			c.File("./upload/placeholder.png")
+		}
+	})
 
 	// ============ C端 ============
 	fg := r.Group("/api/v1/front")
@@ -65,31 +75,56 @@ func main() {
 		fg.POST("/auth/login", front.Login)
 		fg.POST("/auth/register-v2", front.RegisterV2)
 		fg.POST("/auth/reset-password", front.ResetPassword)
+	fg.POST("/sms/send", front.SendSMS)
 		fg.GET("/flash-sale/time", front.FlashSaleTime)
+		fg.GET("/config/service-phone", front.ServicePhone)
+	fg.GET("/config/contract-content", front.ContractContent)
+	fg.GET("/config/trade-rules", front.TradeRules)
 		fg.GET("/banners", front.Banners)
 		fg.GET("/agreements", front.Agreements)
 		fg.GET("/categories", front.Categories)
 		fg.GET("/announcement", front.Announcement)
 
-		auth := fg.Group("", middleware.AuthRequired())
+		auth := fg.Group("", middleware.AuthRequired(), middleware.ContractRequired())
 		{
 			// 秒杀
 			auth.GET("/flash-sale/products", front.FlashSaleProducts)
+			auth.GET("/flash-sale/remaining", front.FlashSaleRemaining)
 			auth.POST("/flash-sale/buy", middleware.RateLimiter(500), front.FlashSaleBuy)
 
 			// 商品
 			auth.GET("/products", front.Products)
 			auth.GET("/products/:id", front.ProductDetail)
+			auth.GET("/merchandises/:id", front.MerchandiseDetail)
 			auth.GET("/merchandises", front.Merchandises)
+			auth.POST("/merchandises/:id/buy", front.BuyMerchandise)
 
 			// 订单
 			auth.GET("/orders", front.MyOrders)
 			auth.GET("/orders/:id", front.MyOrderDetail)
+			auth.POST("/orders/:id/pay", front.PayOrder)
+			auth.POST("/orders/:id/confirm", front.ConfirmOrder)
+			auth.POST("/orders/:id/resell", front.ResellOrder)
+			auth.POST("/orders/:id/cancel", front.CancelOrder)
 
 			// 用户
+			auth.GET("/user/fans", front.MyFans)
+			auth.GET("/user/payment-methods", front.PaymentMethods)
+			auth.POST("/user/payment-method", front.AddPaymentMethod)
+			auth.DELETE("/user/payment-method/:id", front.DeletePaymentMethod)
 			auth.GET("/user/profile", front.Profile)
+			auth.PUT("/user/profile", front.UpdateProfile)
+			auth.GET("/user/addresses", front.Addresses)
+			auth.POST("/user/address", front.AddAddress)
+			auth.PUT("/user/address/:id", front.UpdateAddress)
+			auth.DELETE("/user/address/:id", front.DeleteAddress)
 			auth.GET("/user/wallet", front.Wallet)
+			auth.GET("/user/contract", admin.GetContract)
+			auth.GET("/user/contract-status", front.ContractStatus)
+			auth.POST("/user/contract/sign", front.SignContract)
 			auth.PUT("/user/password", front.ChangePassword)
+			auth.POST("/upload", front.UploadFile)
+			auth.POST("/withdraw", front.Withdraw)
 			auth.GET("/logs/coupon", front.CouponLogs)
 			auth.GET("/logs/self-bonus", front.SelfBonusLogs)
 			auth.GET("/logs/share-bonus", front.ShareBonusLogs)
@@ -112,13 +147,17 @@ func main() {
 			auth.GET("/account/info", admin.GetAccountInfo)
 			auth.PUT("/account/info", admin.UpdateAccountInfo)
 			auth.PUT("/account/password", admin.ChangePassword)
+			auth.POST("/orders/settle-coupons", admin.SettleCoupons)
 
 			// 用户管理
 			auth.GET("/users", admin.ListUsers)
+			auth.GET("/users/export", admin.ExportUsers)
 			auth.GET("/users/:id", admin.GetUser)
 			auth.PUT("/users/:id", admin.UpdateUser)
 			auth.PUT("/users/:id/status", admin.UpdateUserStatus)
 			auth.PUT("/users/:id/parent", admin.UpdateUserParent)
+			auth.POST("/users/:id/contract", admin.UploadContract)
+		auth.POST("/users/:id/contract/reset", admin.ResetContract)
 			auth.POST("/users/:id/recharge", admin.Recharge)
 			auth.POST("/users/batch-delete", admin.BatchDeleteUsers)
 
@@ -133,6 +172,7 @@ func main() {
 
 			// 文件上传
 			auth.POST("/upload", admin.UploadImage)
+			auth.POST("/upload/contract", admin.UploadContractPDF)
 
 			// 分类管理
 			auth.GET("/categories", admin.ListCategories)
@@ -151,19 +191,25 @@ func main() {
 			auth.GET("/merchandises", admin.ListMerchandises)
 			auth.POST("/merchandises/search", admin.SearchMerchandises)
 			auth.POST("/merchandises", admin.CreateMerchandise)
+			auth.PUT("/merchandises/:id", admin.UpdateMerchandise)
 			auth.PUT("/merchandises/:id/status", admin.UpdateMerchandiseStatus)
 			auth.DELETE("/merchandises/:id", admin.DeleteMerchandise)
 
 			// 提现管理
 			auth.GET("/withdraws", admin.ListWithdraws)
+			auth.GET("/withdraws/export", admin.ExportWithdraws)
 			auth.POST("/withdraws/search", admin.SearchWithdraws)
 			auth.PUT("/withdraws/:id/approve", admin.ApproveWithdraw)
 
 			// 财务日志
 			auth.GET("/logs/money", admin.ListMoneyLogs)
+			auth.GET("/logs/money/export", admin.ExportMoneyLogs)
 			auth.GET("/logs/coupon", admin.ListCouponLogs)
+			auth.GET("/logs/coupon/export", admin.ExportCouponLogs)
 			auth.GET("/logs/self-bonus", admin.ListSelfBonusLogs)
+			auth.GET("/logs/self-bonus/export", admin.ExportSelfBonusLogs)
 			auth.GET("/logs/share-bonus", admin.ListShareBonusLogs)
+			auth.GET("/logs/share-bonus/export", admin.ExportShareBonusLogs)
 			auth.POST("/logs/money/search", admin.SearchMoneyLogs)
 			auth.POST("/logs/coupon/search", admin.SearchCouponLogs)
 			auth.POST("/logs/self-bonus/search", admin.SearchSelfBonusLogs)
@@ -249,7 +295,7 @@ func adminLogin(c *gin.Context) {
 		return
 	}
 
-	token, err := middleware.GenerateToken(adminUser.ID, adminUser.Username, true, front.Cfg.JWT.ExpireHours)
+	token, err := middleware.GenerateToken(adminUser.ID, adminUser.Username, true, front.Cfg.JWT.ExpireHours, "")
 	if err != nil {
 		app.InternalError(c, "生成Token失败")
 		return

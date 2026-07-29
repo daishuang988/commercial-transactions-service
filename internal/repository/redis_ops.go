@@ -55,8 +55,7 @@ func IsFlashSaleTime() bool {
 		if today < startDay && today > endDay { return false }
 	}
 
-	startH, startM := 10, 0
-	endH, endM := 10, 30
+	var startH, startM, endH, endM int
 	fmt.Sscanf(startStr, "%d:%d", &startH, &startM)
 	fmt.Sscanf(endStr, "%d:%d", &endH, &endM)
 
@@ -88,6 +87,10 @@ func getConfig(key string) string {
 	var val string
 	DB.Table("system_configs").Select("config_value").Where("config_key = ?", key).Scan(&val)
 	return val
+}
+
+func GetConfigStr(key string) string {
+	return getConfig(key)
 }
 
 func GetConfigInt(key string, defaultVal int) int {

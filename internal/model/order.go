@@ -24,7 +24,8 @@ type Order struct {
 	PayTime        *time.Time `json:"pay_time"        gorm:"column:pay_time"`
 	BuyTime        *time.Time `json:"buy_time"        gorm:"column:buy_time"`     // 抢单时间
 	ConfirmTime    *time.Time `json:"confirm_time"    gorm:"column:confirm_time"`
-	Status         int8       `json:"status"          gorm:"column:status"`       // 1待确认 2已完成
+	Status         int8       `json:"status"          gorm:"column:status"`       // 0待付款 1待确认 2已完成
+	CouponSettled  int8       `json:"coupon_settled"  gorm:"column:coupon_settled"` // 0未结算 1已结算
 	CreatedAt      time.Time  `json:"created_at"      gorm:"column:created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"      gorm:"column:updated_at"`
 }

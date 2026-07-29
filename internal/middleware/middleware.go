@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"commercial-transactions-service/internal/config"
+	"commercial-transactions-service/internal/repository"
 	"commercial-transactions-service/pkg/app"
 
 	"github.com/gin-gonic/gin"
@@ -18,6 +19,7 @@ type JWTClaims struct {
 	UserID   int64  `json:"user_id"`
 	Username string `json:"username"`
 	IsAdmin  bool   `json:"is_admin"`
+	Token    string `json:"token"`
 	jwt.RegisteredClaims
 }
 
@@ -28,11 +30,12 @@ func InitJWT(cfg *config.JWTConfig) {
 }
 
 // GenerateToken 生成JWT Token
-func GenerateToken(userID int64, username string, isAdmin bool, expireHours int) (string, error) {
+func GenerateToken(userID int64, username string, isAdmin bool, expireHours int, tokenVer string) (string, error) {
 	claims := JWTClaims{
 		UserID:   userID,
 		Username: username,
 		IsAdmin:  isAdmin,
+		Token:    tokenVer,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(expireHours) * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -69,6 +72,24 @@ func AuthRequired() gin.HandlerFunc {
 		}
 		if claims.IsAdmin {
 			app.Forbidden(c, "请使用用户账号登录")
+			c.Abort()
+			return
+		}
+		// C端校验token版本（密码修改后旧token失效）
+		if claims.Token != "" {
+			var storedToken string
+			repository.DB.Table("users").Select("token").Where("id = ?", claims.UserID).Scan(&storedToken)
+			if storedToken != claims.Token {
+				app.Unauthorized(c, "密码已修改，请重新登录")
+				c.Abort()
+				return
+			}
+		}
+		// 检查账号是否冻结
+		var userStatus int8
+		repository.DB.Table("users").Select("status").Where("id = ?", claims.UserID).Scan(&userStatus)
+		if userStatus == 0 {
+			app.Fail(c, app.ErrCodeUserFrozen, "账号已冻结，请联系管理员")
 			c.Abort()
 			return
 		}
@@ -174,7 +195,8 @@ func CORS() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Requested-With")
+		c.Header("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Requested-With,X-Contract-Signed")
+		c.Header("Access-Control-Expose-Headers", "X-Contract-Signed")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return
@@ -185,5 +207,39 @@ func CORS() gin.HandlerFunc {
 		if ct == "application/json" || ct == "application/json; charset=utf-8" {
 			c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 		}
+	}
+}
+
+// ContractRequired 合同签署检查中间件（C端需认证路由用）
+func ContractRequired() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		path := c.Request.URL.Path
+		uid := c.GetInt64("user_id")
+		var signature string
+		repository.DB.Table("user_contracts").Select("contract_path").Where("user_id=? AND contract_path IS NOT NULL AND contract_path != ''", uid).Order("id DESC").Scan(&signature)
+		signed := signature != ""
+
+		// 已签：直接放行
+		if signed {
+			c.Header("X-Contract-Signed", "true")
+			c.Next()
+			return
+		}
+
+		// 未签白名单：个人信息 + 合同 + 上传 + 配置
+		isAllow := strings.Contains(path, "/contract") ||
+			strings.Contains(path, "/user/profile") ||
+			strings.Contains(path, "/upload") ||
+			strings.Contains(path, "/config/") ||
+			strings.Contains(path, "/flash-sale/time")
+		if isAllow {
+			c.Header("X-Contract-Signed", "false")
+			c.Next()
+			return
+		}
+
+		c.Header("X-Contract-Signed", "false")
+		c.JSON(http.StatusOK, app.Response{Code: app.ErrCodeContractUnsigned, Msg: "请签署平台用户合同"})
+		c.Abort()
 	}
 }

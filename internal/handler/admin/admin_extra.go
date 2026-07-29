@@ -10,6 +10,7 @@ import (
 	"commercial-transactions-service/pkg/app"
 	"commercial-transactions-service/pkg/utils"
 
+	"github.com/xuri/excelize/v2"
 	"github.com/gin-gonic/gin"
 )
 
@@ -636,4 +637,149 @@ func padTime(v string, isEnd bool) string {
 		return v + " 00:00:00"
 	}
 	return v
+}
+
+// ExportUsers 导出用户XLSX GET /api/v1/admin/users/export
+func ExportUsers(c *gin.Context) {
+	today := time.Now().In(repository.CSTLocation()).Format("01-02")
+
+	type ExportRow struct {
+		Nickname       string
+		TodaySellTotal float64
+		TodayBuyTotal  float64
+		ParentID       int64
+		ParentNickname string
+	}
+	var rows []ExportRow
+	repository.DB.Raw(`
+		SELECT u.nickname,
+			COALESCE((SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.seller_id=u.id AND o.status=2 AND DATE(o.confirm_time)=CURDATE()), 0) AS today_sell_total,
+			COALESCE((SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.buyer_id=u.id AND o.status=2 AND DATE(o.confirm_time)=CURDATE()), 0) AS today_buy_total,
+			COALESCE(u.pid,0) AS parent_id,
+			COALESCE((SELECT p.nickname FROM users p WHERE p.id=u.pid), '') AS parent_nickname
+		FROM users u
+		ORDER BY u.id DESC LIMIT 5000
+	`).Scan(&rows)
+
+	f := excelize.NewFile()
+	sheet := "用户下单统计表" + time.Now().In(repository.CSTLocation()).Format("20060102")
+	f.SetSheetName("Sheet1", sheet)
+	headers := []string{"昵称", today + "卖货", today + "买货", "差额", "推广人ID", "推广人"}
+	for i, h := range headers { col, _ := excelize.CoordinatesToCellName(i+1, 1); f.SetCellValue(sheet, col, h) }
+	for i, r := range rows {
+		row := i + 2
+		f.SetCellValue(sheet, fmt.Sprintf("A%d", row), r.Nickname)
+		f.SetCellValue(sheet, fmt.Sprintf("B%d", row), r.TodaySellTotal)
+		f.SetCellValue(sheet, fmt.Sprintf("C%d", row), r.TodayBuyTotal)
+		f.SetCellValue(sheet, fmt.Sprintf("D%d", row), r.TodaySellTotal-r.TodayBuyTotal)
+		f.SetCellValue(sheet, fmt.Sprintf("E%d", row), r.ParentID)
+		f.SetCellValue(sheet, fmt.Sprintf("F%d", row), r.ParentNickname)
+	}
+	autoWidth(f, sheet, 6)
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=用户下单统计表%s.xlsx", time.Now().In(repository.CSTLocation()).Format("20060102")))
+	f.Write(c.Writer)
+}
+
+// ExportWithdraws 导出提现XLSX GET /api/v1/admin/withdraws/export
+func ExportWithdraws(c *gin.Context) {
+	var list []map[string]interface{}
+	repository.DB.Raw(`SELECT w.*, u.nickname, a.username acct_name, a.account acct_account, a.bank acct_bank, a.phone acct_phone FROM withdraws w LEFT JOIN users u ON w.user_id=u.id LEFT JOIN withdraw_accounts a ON w.account_id=a.id ORDER BY w.id DESC LIMIT 5000`).Scan(&list)
+
+	f := excelize.NewFile()
+	sheet := "提现申请" + time.Now().In(repository.CSTLocation()).Format("20060102")
+	f.SetSheetName("Sheet1", sheet)
+	heads := []string{"提现编号","用户姓名","提现货币","提现账号类型","提现金额","手续费","实际到账金额","提现账号信息","状态","备注","申请时间","更新时间"}
+	for i, h := range heads { col, _ := excelize.CoordinatesToCellName(i+1, 1); f.SetCellValue(sheet, col, h) }
+	for i, w := range list {
+		row := i + 2
+		// 货币
+		cur := "优惠券"; if fmt.Sprintf("%v", w["currency_type"]) == "share_bonus" { cur = "推广奖金" }
+		// 账号类型
+		acctType := "银行卡"; if fmt.Sprintf("%v", w["account_type"]) == "2" { acctType = "支付宝" }
+		// 状态
+		st := "待处理"; switch fmt.Sprintf("%v", w["status"]) { case "1": st = "已通过"; case "3": st = "已驳回" }
+		// 账号信息: 收款人/账号/银行/电话
+		acctInfo := fmt.Sprintf("%v / %v / %v / %v", w["acct_name"], w["acct_account"], w["acct_bank"], w["acct_phone"])
+		vals := []interface{}{w["transfer_no"],w["nickname"],cur,acctType,w["money"],w["handling_fee"],w["actual_amount"],acctInfo,st,w["remark"],w["created_at"],w["updated_at"]}
+		for j, v := range vals { col, _ := excelize.CoordinatesToCellName(j+1, row); f.SetCellValue(sheet, col, v) }
+	}
+	autoWidth(f, sheet, 12)
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s.xlsx", sheet))
+	f.Write(c.Writer)
+}
+
+func exportLogXLSX(c *gin.Context, table, sheetName string) {
+	var list []map[string]interface{}
+	repository.DB.Raw(fmt.Sprintf("SELECT l.*, u.nickname FROM %s l LEFT JOIN users u ON l.user_id=u.id ORDER BY l.id DESC LIMIT 5000", table)).Scan(&list)
+	f := excelize.NewFile()
+	f.SetSheetName("Sheet1", sheetName)
+	for i, h := range []string{"ID","用户ID","用户昵称","类型","金额","变动前","变动后","备注","时间"} {
+		col, _ := excelize.CoordinatesToCellName(i+1, 1); f.SetCellValue(sheetName, col, h)
+	}
+	for i, r := range list {
+		row := i + 2
+		typeName := "收入"; if fmt.Sprintf("%v", r["type"]) == "2" { typeName = "支出" }
+		vals := []interface{}{r["id"],r["user_id"],r["nickname"],typeName,r["money"],r["before"],r["after"],r["memo"],r["created_at"]}
+		for j, v := range vals { col, _ := excelize.CoordinatesToCellName(j+1, row); f.SetCellValue(sheetName, col, v) }
+	}
+	autoWidth(f, sheetName, 9)
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s.xlsx", sheetName))
+	f.Write(c.Writer)
+}
+
+func autoWidth(f *excelize.File, sheet string, cols int) {
+	for i := 1; i <= cols; i++ { col, _ := excelize.CoordinatesToCellName(i, 1); f.SetColWidth(sheet, col, col, 22) }
+}
+
+// ExportCouponLogs / ExportSelfBonusLogs / ExportShareBonusLogs / ExportMoneyLogs
+func ExportCouponLogs(c *gin.Context)   { exportLogXLSX(c, "coupon_logs", "优惠券明细"+time.Now().In(repository.CSTLocation()).Format("20060102")) }
+func ExportSelfBonusLogs(c *gin.Context) { exportLogXLSX(c, "self_bonus_logs", "个人奖金明细"+time.Now().In(repository.CSTLocation()).Format("20060102")) }
+func ExportShareBonusLogs(c *gin.Context) { exportLogXLSX(c, "share_bonus_logs", "推广奖金明细"+time.Now().In(repository.CSTLocation()).Format("20060102")) }
+func ExportMoneyLogs(c *gin.Context)      { exportLogXLSX(c, "money_logs", "余额明细"+time.Now().In(repository.CSTLocation()).Format("20060102")) }
+
+// ResetContract 重签合同 POST /api/v1/admin/users/:id/contract/reset
+func ResetContract(c *gin.Context) {
+	id := parseIntParam(c, "id")
+	repository.DB.Where("user_id = ?", id).Delete(&model.UserContract{})
+	repository.DB.Model(&model.User{}).Where("id = ?", id).Update("contract", "")
+	app.OK(c, gin.H{"msg": "合同已重置，用户可重新签署"})
+}
+
+// GetContract 查看用户合同 GET /api/v1/front/user/contract
+func GetContract(c *gin.Context) {
+	uid := c.GetInt64("user_id")
+	var path string
+	repository.DB.Table("user_contracts").Select("contract_path").Where("user_id=?", uid).Order("id DESC").Limit(1).Scan(&path)
+	app.OK(c, gin.H{"contract": path})
+}
+
+// UploadContract 上传用户合同 POST /api/v1/admin/users/:id/contract
+func UploadContract(c *gin.Context) {
+	id := parseIntParam(c, "id")
+	var req struct{ Path string `json:"path" binding:"required"` }
+	if err := c.ShouldBindJSON(&req); err != nil {
+		app.BadRequest(c, "请提供合同路径")
+		return
+	}
+	now := time.Now()
+	repository.DB.Exec("INSERT INTO user_contracts (user_id,contract_path,created_at) VALUES(?,?,?)", id, req.Path, now)
+	repository.DB.Model(&model.User{}).Where("id=?", id).Update("contract", req.Path)
+	app.OK(c, gin.H{"msg": "合同已上传"})
+}
+
+// UpdateMerchandise 编辑寄售商品 PUT /api/v1/admin/merchandises/:id
+func UpdateMerchandise(c *gin.Context) {
+	id := parseIntParam(c, "id")
+	var req map[string]interface{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		app.BadRequest(c, "参数错误")
+		return
+	}
+	delete(req, "id")
+	req["updated_at"] = time.Now()
+	repository.DB.Model(&model.Merchandise{}).Where("id = ?", id).Updates(req)
+	app.OK(c, nil)
 }

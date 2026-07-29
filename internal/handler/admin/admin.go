@@ -10,6 +10,7 @@ import (
 
 	"commercial-transactions-service/internal/model"
 	"commercial-transactions-service/internal/repository"
+	"commercial-transactions-service/internal/service"
 	"commercial-transactions-service/pkg/app"
 	"commercial-transactions-service/pkg/utils"
 
@@ -141,6 +142,33 @@ func UpdateCategory(c *gin.Context) {
 	app.OK(c, nil)
 }
 
+// UploadContractPDF 合同PDF上传 POST /api/v1/admin/upload/contract
+func UploadContractPDF(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		app.BadRequest(c, "请选择文件")
+		return
+	}
+	if file.Size > 20*1024*1024 {
+		app.BadRequest(c, "文件大小不能超过20MB")
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if ext != ".pdf" {
+		app.BadRequest(c, "仅支持PDF格式")
+		return
+	}
+	filename := fmt.Sprintf("%s_%s%s", time.Now().Format("20060102"), utils.RandStr(8), ext)
+	savePath := filepath.Join("upload", "contract", filename)
+	fullPath := filepath.Join(".", savePath)
+	os.MkdirAll(filepath.Dir(fullPath), 0755)
+	if err := c.SaveUploadedFile(file, fullPath); err != nil {
+		app.InternalError(c, "上传失败")
+		return
+	}
+	app.OK(c, gin.H{"url": "/" + filepath.ToSlash(savePath)})
+}
+
 // UploadImage 图片上传 POST /api/v1/admin/upload
 func UploadImage(c *gin.Context) {
 	file, err := c.FormFile("file")
@@ -239,6 +267,7 @@ func UpdateUser(c *gin.Context) {
 		salt := utils.RandStr(6)
 		updates["password"] = utils.MD5Hash(req.Password + salt)
 		updates["salt"] = salt
+		updates["token"] = "" // 密码变更后踢掉当前登录态
 	}
 	if req.IsPriority != nil {
 		updates["is_priority"] = *req.IsPriority
@@ -505,11 +534,11 @@ func SearchOrders(c *gin.Context) {
 		where += fmt.Sprintf(" AND confirm_time <= '%s'", padTime(req.ConfirmEnd, true))
 	}
 
-	var list []model.Order
+	var list []map[string]interface{}
 	var count int64
 	repository.DB.Raw("SELECT count(*) FROM orders" + where).Scan(&count)
-	repository.DB.Raw(fmt.Sprintf("SELECT * FROM orders%s ORDER BY id DESC LIMIT %d OFFSET %d", where, req.Limit, (req.Page-1)*req.Limit)).Scan(&list)
-	if list == nil { list = []model.Order{} }
+	repository.DB.Raw(fmt.Sprintf("SELECT o.*, bu.nickname as buyer_name, su.nickname as seller_name FROM orders o LEFT JOIN users bu ON o.buyer_id=bu.id LEFT JOIN users su ON o.seller_id=su.id%s ORDER BY o.id DESC LIMIT %d OFFSET %d", where, req.Limit, (req.Page-1)*req.Limit)).Scan(&list)
+	if list == nil { list = []map[string]interface{}{} }
 	app.OKWithCount(c, list, count)
 }
 
@@ -520,12 +549,20 @@ func ListOrders(c *gin.Context) {
 		app.BadRequest(c, "参数错误")
 		return
 	}
-	orders, count, err := repository.ListOrders(req)
-	if err != nil {
-		app.InternalError(c, "查询失败")
-		return
+	where := " WHERE 1=1"
+	if req.Status != nil { where += fmt.Sprintf(" AND o.status = %d", *req.Status) }
+	if req.SellerID != nil { where += fmt.Sprintf(" AND o.seller_id = %d", *req.SellerID) }
+	if req.BuyerID != nil { where += fmt.Sprintf(" AND o.buyer_id = %d", *req.BuyerID) }
+	if req.Keyword != "" {
+		kw := "%" + req.Keyword + "%"
+		where += fmt.Sprintf(" AND (o.order_sn LIKE '%s' OR o.consignee LIKE '%s' OR o.phone LIKE '%s')", kw, kw, kw)
 	}
-	app.OKWithCount(c, orders, count)
+	var list []map[string]interface{}
+	var count int64
+	repository.DB.Raw("SELECT count(*) FROM orders o" + where).Scan(&count)
+	repository.DB.Raw(fmt.Sprintf("SELECT o.*, bu.nickname as buyer_name, su.nickname as seller_name FROM orders o LEFT JOIN users bu ON o.buyer_id=bu.id LEFT JOIN users su ON o.seller_id=su.id%s ORDER BY o.id DESC LIMIT %d OFFSET %d", where, req.Limit, (req.Page-1)*req.Limit)).Scan(&list)
+	if list == nil { list = []map[string]interface{}{} }
+	app.OKWithCount(c, list, count)
 }
 
 // GetOrder 订单详情 GET /api/v1/admin/orders/:id
@@ -543,16 +580,18 @@ func GetOrder(c *gin.Context) {
 func UpdateOrderStatus(c *gin.Context) {
 	id := parseIntParam(c, "id")
 	var req struct {
-		Status int8 `json:"status" binding:"required"`
+		Status *int8 `json:"status"`
+		IsShow *int8 `json:"is_show"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	c.ShouldBindJSON(&req)
+	updates := map[string]interface{}{"updated_at": time.Now()}
+	if req.Status != nil { updates["status"] = *req.Status }
+	if req.IsShow != nil { updates["is_show"] = *req.IsShow }
+	if len(updates) == 1 {
 		app.BadRequest(c, "参数错误")
 		return
 	}
-	if err := repository.UpdateOrderStatus(id, req.Status); err != nil {
-		app.InternalError(c, "操作失败")
-		return
-	}
+	repository.DB.Model(&model.Order{}).Where("id = ?", id).Updates(updates)
 	app.OK(c, nil)
 }
 
@@ -635,18 +674,21 @@ func (w WithdrawWithUser) MarshalJSON() ([]byte, error) {
 		"qrcode":   w.AcctQrcode,
 	}
 
+	acctTypeName := map[int8]string{1: "银行卡", 2: "支付宝"}
 	return json.Marshal(struct {
 		Alias
-		AccountInfo map[string]interface{} `json:"account_info"`
-		User        map[string]interface{} `json:"user"`
+		AccountInfo     map[string]interface{} `json:"account_info"`
+		User            map[string]interface{} `json:"user"`
+		AccountTypeName string                 `json:"account_type_name"`
 	}{
-		Alias:       Alias(w),
+		Alias:           Alias(w),
 		AccountInfo: acctInfo,
 		User: map[string]interface{}{
 			"id":       w.UserID,
 			"nickname": w.Nickname,
 			"mobile":   w.Mobile,
 		},
+		AccountTypeName: acctTypeName[w.AccountType],
 	})
 }
 
@@ -657,6 +699,8 @@ func SearchWithdraws(c *gin.Context) {
 		Limit       int    `json:"limit"`
 		TransferNo  string `json:"transfer_no"`
 		Currency    string `json:"currency_type"`
+		AccountType *int   `json:"account_type"`
+		Username    string `json:"username"`
 		Account     string `json:"account"`
 		Status      *int   `json:"status"`
 		CreateStart string `json:"create_start"`
@@ -672,29 +716,35 @@ func SearchWithdraws(c *gin.Context) {
 
 	where := " WHERE 1=1"
 	if req.TransferNo != "" {
-		where += fmt.Sprintf(" AND transfer_no LIKE '%%%s%%'", req.TransferNo)
+		where += fmt.Sprintf(" AND w.transfer_no LIKE '%%%s%%'", req.TransferNo)
 	}
 	if req.Currency != "" {
-		where += fmt.Sprintf(" AND currency_type = '%s'", req.Currency)
+		where += fmt.Sprintf(" AND w.currency_type = '%s'", req.Currency)
+	}
+	if req.AccountType != nil {
+		where += fmt.Sprintf(" AND w.account_type = %d", *req.AccountType)
+	}
+	if req.Username != "" {
+		where += fmt.Sprintf(" AND (u.nickname LIKE '%%%s%%' OR u.username LIKE '%%%s%%' OR u.mobile LIKE '%%%s%%')", req.Username, req.Username, req.Username)
 	}
 	if req.Account != "" {
-		where += fmt.Sprintf(" AND (account_id IN (SELECT id FROM withdraw_accounts WHERE account LIKE '%%%s%%' OR username LIKE '%%%s%%') OR user_id IN (SELECT id FROM users WHERE username LIKE '%%%s%%' OR nickname LIKE '%%%s%%'))",
+		where += fmt.Sprintf(" AND (w.account_id IN (SELECT id FROM withdraw_accounts WHERE account LIKE '%%%s%%' OR username LIKE '%%%s%%') OR w.user_id IN (SELECT id FROM users WHERE username LIKE '%%%s%%' OR nickname LIKE '%%%s%%'))",
 			req.Account, req.Account, req.Account, req.Account)
 	}
 	if req.Status != nil {
-		where += fmt.Sprintf(" AND status = %d", *req.Status)
+		where += fmt.Sprintf(" AND w.status = %d", *req.Status)
 	}
 	if req.CreateStart != "" {
-		where += fmt.Sprintf(" AND created_at >= '%s'", padTime(req.CreateStart, false))
+		where += fmt.Sprintf(" AND w.created_at >= '%s'", padTime(req.CreateStart, false))
 	}
 	if req.CreateEnd != "" {
-		where += fmt.Sprintf(" AND created_at <= '%s'", padTime(req.CreateEnd, true))
+		where += fmt.Sprintf(" AND w.created_at <= '%s'", padTime(req.CreateEnd, true))
 	}
 	if req.UpdateStart != "" {
-		where += fmt.Sprintf(" AND updated_at >= '%s'", padTime(req.UpdateStart, false))
+		where += fmt.Sprintf(" AND w.updated_at >= '%s'", padTime(req.UpdateStart, false))
 	}
 	if req.UpdateEnd != "" {
-		where += fmt.Sprintf(" AND updated_at <= '%s'", padTime(req.UpdateEnd, true))
+		where += fmt.Sprintf(" AND w.updated_at <= '%s'", padTime(req.UpdateEnd, true))
 	}
 
 	var list []WithdrawWithUser
@@ -730,11 +780,47 @@ func ApproveWithdraw(c *gin.Context) {
 		app.BadRequest(c, "参数错误")
 		return
 	}
+
+	// 拒绝时退款
+	if req.Status == 3 {
+		w, err := repository.GetWithdrawByID(id)
+		if err != nil || w == nil {
+			app.NotFound(c, "提现记录不存在")
+			return
+		}
+		if w.Status != 2 {
+			app.BadRequest(c, "该提现已处理过")
+			return
+		}
+		// 退款到对应账户
+		refundMoney(w.UserID, w.CurrencyType, w.Money)
+	}
+
 	if err := repository.UpdateWithdrawStatus(id, req.Status); err != nil {
 		app.InternalError(c, "操作失败")
 		return
 	}
 	app.OK(c, nil)
+}
+
+func refundMoney(userID int64, currency string, amount float64) {
+	wallet, _ := repository.GetUserWallet(userID)
+	if wallet == nil { return }
+	now := time.Now()
+	switch currency {
+	case "coupon":
+		before := wallet.Coupon
+		after := before + amount
+		repository.DB.Exec(
+			"INSERT INTO coupon_logs (user_id,type,money,`before`,`after`,memo,created_at,updated_at) VALUES(?,1,?,?,?,?,?,?)",
+			userID, amount, before, after, "提现驳回退款", now, now)
+	case "share_bonus":
+		before := wallet.ShareBonus
+		after := before + amount
+		repository.DB.Exec(
+			"INSERT INTO share_bonus_logs (user_id,type,money,`before`,`after`,memo,created_at,updated_at) VALUES(?,1,?,?,?,?,?,?)",
+			userID, amount, before, after, "提现驳回退款", now, now)
+	}
 }
 
 // ─── 财务日志 ───
@@ -949,4 +1035,10 @@ func queryInt(c *gin.Context, key string, def int) int {
 		}
 	}
 	return def
+}
+
+// SettleCoupons 手动触发优惠券凌晨结算
+func SettleCoupons(c *gin.Context) {
+	service.SettleDailyCoupons()
+	app.OK(c, gin.H{"msg": "优惠券结算完成"})
 }

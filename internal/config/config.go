@@ -35,7 +35,7 @@ type MySQLConfig struct {
 }
 
 func (m MySQLConfig) DSN() string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=true&loc=Local&interpolateParams=true",
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=true&loc=Local",
 		m.User, m.Password, m.Host, m.Port, m.Database, m.Charset)
 }
 

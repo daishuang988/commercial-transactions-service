@@ -53,7 +53,9 @@ func (Merchandise) TableName() string { return "merchandises" }
 
 // FlashSaleBuyReq 抢购请求
 type FlashSaleBuyReq struct {
-	ProductID int64 `json:"product_id" binding:"required"`
+	ProductID int64  `json:"product_id" binding:"required"`
+	Consignee string `json:"consignee"   binding:"required"`
+	Phone     string `json:"phone"       binding:"required"`
 }
 
 // FlashSaleProductResp 前端展示的秒杀商品
