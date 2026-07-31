@@ -190,10 +190,24 @@ func RequestLogger() gin.HandlerFunc {
 	}
 }
 
-// CORS 跨域
-func CORS() gin.HandlerFunc {
+// CORS 跨域（读取配置allow_origin，默认*）
+func CORS(allowOrigin string) gin.HandlerFunc {
+	if allowOrigin == "" {
+		allowOrigin = "*"
+	}
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
+		origin := c.GetHeader("Origin")
+		if origin == "" {
+			origin = allowOrigin
+		}
+		// 白名单模式：如果配了具体域名，匹配Origin
+		if allowOrigin != "*" {
+			if origin == allowOrigin || allowOrigin == "" {
+				c.Header("Access-Control-Allow-Origin", origin)
+			}
+		} else {
+			c.Header("Access-Control-Allow-Origin", allowOrigin)
+		}
 		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Requested-With,X-Contract-Signed")
 		c.Header("Access-Control-Expose-Headers", "X-Contract-Signed")

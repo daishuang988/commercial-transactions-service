@@ -46,7 +46,7 @@ func main() {
 
 	gin.SetMode(cfg.Server.Mode)
 	r := gin.New()
-	r.Use(middleware.Recovery(), middleware.RequestLogger(), middleware.CORS())
+	r.Use(middleware.Recovery(), middleware.RequestLogger(), middleware.CORS(cfg.CORS.AllowOrigin))
 
 	// 健康检查
 	r.GET("/health", func(c *gin.Context) {
@@ -72,7 +72,7 @@ func main() {
 	// ============ C端 ============
 	fg := r.Group("/api/v1/front")
 	{
-		fg.POST("/auth/login", front.Login)
+		fg.POST("/auth/login", middleware.RateLimiter(100), front.Login)
 		fg.POST("/auth/register-v2", front.RegisterV2)
 		fg.POST("/auth/reset-password", front.ResetPassword)
 	fg.POST("/sms/send", front.SendSMS)
@@ -97,7 +97,7 @@ func main() {
 			auth.GET("/products/:id", front.ProductDetail)
 			auth.GET("/merchandises/:id", front.MerchandiseDetail)
 			auth.GET("/merchandises", front.Merchandises)
-			auth.POST("/merchandises/:id/buy", front.BuyMerchandise)
+			auth.POST("/merchandises/:id/buy", middleware.RateLimiter(500), front.BuyMerchandise)
 
 			// 订单
 			auth.GET("/orders", front.MyOrders)
@@ -124,7 +124,7 @@ func main() {
 			auth.POST("/user/contract/sign", front.SignContract)
 			auth.PUT("/user/password", front.ChangePassword)
 			auth.POST("/upload", front.UploadFile)
-			auth.POST("/withdraw", front.Withdraw)
+			auth.POST("/withdraw", middleware.RateLimiter(50), front.Withdraw)
 			auth.GET("/logs/coupon", front.CouponLogs)
 			auth.GET("/logs/self-bonus", front.SelfBonusLogs)
 			auth.GET("/logs/share-bonus", front.ShareBonusLogs)
@@ -248,10 +248,11 @@ func main() {
 	}
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
-	log.Printf("🚀 服务启动: %s", addr)
+	srv := &http.Server{Addr: addr, Handler: r}
 
 	go func() {
-		if err := r.Run(addr); err != nil {
+		log.Printf("🚀 服务启动: %s", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("启动失败: %v", err)
 		}
 	}()
@@ -261,7 +262,13 @@ func main() {
 	<-quit
 	log.Println("正在关闭...")
 	cancel()
-	time.Sleep(2 * time.Second)
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("强制关闭: %v", err)
+	}
+	log.Println("服务已停止")
 }
 
 func adminLogin(c *gin.Context) {
@@ -272,10 +279,6 @@ func adminLogin(c *gin.Context) {
 	}
 
 	adminUser, err := repository.GetAdminByUsername(req.Username)
-	if err != nil {
-		// 用户名查不到，试试手机号
-		adminUser, err = repository.GetAdminByUsername(req.Username)
-	}
 	if err == nil && adminUser == nil {
 		err = fmt.Errorf("not found")
 	}

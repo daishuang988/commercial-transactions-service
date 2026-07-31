@@ -419,6 +419,9 @@ func Recharge(c *gin.Context) {
 	case "share_bonus":
 		repository.DB.Exec("INSERT INTO share_bonus_logs (user_id,type,money,`before`,`after`,memo,created_at,updated_at) VALUES(?,?,?,?,?,?,NOW(),NOW())",
 			id, logType, req.Amount, currentBalance, newBalance, desc)
+	case "money":
+		repository.DB.Exec("INSERT INTO money_logs (user_id,type,money,`before`,`after`,memo,created_at,updated_at) VALUES(?,?,?,?,?,?,NOW(),NOW())",
+			id, logType, req.Amount, currentBalance, newBalance, desc)
 	}
 
 	app.OK(c, gin.H{
@@ -503,42 +506,56 @@ func SearchOrders(c *gin.Context) {
 	if req.Page < 1 { req.Page = 1 }
 	if req.Limit < 1 || req.Limit > 100 { req.Limit = 20 }
 
+	var args []interface{}
 	where := " WHERE 1=1"
 	if req.OrderSN != "" {
-		where += fmt.Sprintf(" AND order_sn = '%s'", req.OrderSN)
+		where += " AND order_sn = ?"
+		args = append(args, req.OrderSN)
 	}
 	if req.SellerID > 0 {
-		where += fmt.Sprintf(" AND seller_id = %d", req.SellerID)
+		where += " AND seller_id = ?"
+		args = append(args, req.SellerID)
 	}
 	if req.BuyerID > 0 {
-		where += fmt.Sprintf(" AND buyer_id = %d", req.BuyerID)
+		where += " AND buyer_id = ?"
+		args = append(args, req.BuyerID)
 	}
 	if req.Status != nil {
-		where += fmt.Sprintf(" AND status = %d", *req.Status)
+		where += " AND status = ?"
+		args = append(args, *req.Status)
 	}
 	if req.IsResell != nil {
-		where += fmt.Sprintf(" AND is_resell = %d", *req.IsResell)
+		where += " AND is_resell = ?"
+		args = append(args, *req.IsResell)
 	}
 	if req.IsShow != nil {
-		where += fmt.Sprintf(" AND is_show = %d", *req.IsShow)
+		where += " AND is_show = ?"
+		args = append(args, *req.IsShow)
 	}
 	if req.BuyStart != "" {
-		where += fmt.Sprintf(" AND buy_time >= '%s'", padTime(req.BuyStart, false))
+		where += " AND buy_time >= ?"
+		args = append(args, padTime(req.BuyStart, false))
 	}
 	if req.BuyEnd != "" {
-		where += fmt.Sprintf(" AND buy_time <= '%s'", padTime(req.BuyEnd, true))
+		where += " AND buy_time <= ?"
+		args = append(args, padTime(req.BuyEnd, true))
 	}
 	if req.ConfirmStart != "" {
-		where += fmt.Sprintf(" AND confirm_time >= '%s'", padTime(req.ConfirmStart, false))
+		where += " AND confirm_time >= ?"
+		args = append(args, padTime(req.ConfirmStart, false))
 	}
 	if req.ConfirmEnd != "" {
-		where += fmt.Sprintf(" AND confirm_time <= '%s'", padTime(req.ConfirmEnd, true))
+		where += " AND confirm_time <= ?"
+		args = append(args, padTime(req.ConfirmEnd, true))
 	}
 
+	args = append(args, req.Limit, (req.Page-1)*req.Limit)
 	var list []map[string]interface{}
 	var count int64
-	repository.DB.Raw("SELECT count(*) FROM orders" + where).Scan(&count)
-	repository.DB.Raw(fmt.Sprintf("SELECT o.*, bu.nickname as buyer_name, su.nickname as seller_name FROM orders o LEFT JOIN users bu ON o.buyer_id=bu.id LEFT JOIN users su ON o.seller_id=su.id%s ORDER BY o.id DESC LIMIT %d OFFSET %d", where, req.Limit, (req.Page-1)*req.Limit)).Scan(&list)
+	countSQL := "SELECT count(*) FROM orders" + where
+	listSQL := "SELECT o.*, bu.nickname as buyer_name, su.nickname as seller_name FROM orders o LEFT JOIN users bu ON o.buyer_id=bu.id LEFT JOIN users su ON o.seller_id=su.id" + where + " ORDER BY o.id DESC LIMIT ? OFFSET ?"
+	repository.DB.Raw(countSQL, args[:len(args)-2]...).Scan(&count)
+	repository.DB.Raw(listSQL, args...).Scan(&list)
 	if list == nil { list = []map[string]interface{}{} }
 	app.OKWithCount(c, list, count)
 }
@@ -550,18 +567,23 @@ func ListOrders(c *gin.Context) {
 		app.BadRequest(c, "参数错误")
 		return
 	}
+	var args []interface{}
 	where := " WHERE 1=1"
-	if req.Status != nil { where += fmt.Sprintf(" AND o.status = %d", *req.Status) }
-	if req.SellerID != nil { where += fmt.Sprintf(" AND o.seller_id = %d", *req.SellerID) }
-	if req.BuyerID != nil { where += fmt.Sprintf(" AND o.buyer_id = %d", *req.BuyerID) }
+	if req.Status != nil { where += " AND o.status = ?"; args = append(args, *req.Status) }
+	if req.SellerID != nil { where += " AND o.seller_id = ?"; args = append(args, *req.SellerID) }
+	if req.BuyerID != nil { where += " AND o.buyer_id = ?"; args = append(args, *req.BuyerID) }
 	if req.Keyword != "" {
 		kw := "%" + req.Keyword + "%"
-		where += fmt.Sprintf(" AND (o.order_sn LIKE '%s' OR o.consignee LIKE '%s' OR o.phone LIKE '%s')", kw, kw, kw)
+		where += " AND (o.order_sn LIKE ? OR o.consignee LIKE ? OR o.phone LIKE ?)"
+		args = append(args, kw, kw, kw)
 	}
+	args = append(args, req.Limit, (req.Page-1)*req.Limit)
 	var list []map[string]interface{}
 	var count int64
-	repository.DB.Raw("SELECT count(*) FROM orders o" + where).Scan(&count)
-	repository.DB.Raw(fmt.Sprintf("SELECT o.*, bu.nickname as buyer_name, su.nickname as seller_name FROM orders o LEFT JOIN users bu ON o.buyer_id=bu.id LEFT JOIN users su ON o.seller_id=su.id%s ORDER BY o.id DESC LIMIT %d OFFSET %d", where, req.Limit, (req.Page-1)*req.Limit)).Scan(&list)
+	countSQL := "SELECT count(*) FROM orders o" + where
+	listSQL := "SELECT o.*, bu.nickname as buyer_name, su.nickname as seller_name FROM orders o LEFT JOIN users bu ON o.buyer_id=bu.id LEFT JOIN users su ON o.seller_id=su.id" + where + " ORDER BY o.id DESC LIMIT ? OFFSET ?"
+	repository.DB.Raw(countSQL, args[:len(args)-2]...).Scan(&count)
+	repository.DB.Raw(listSQL, args...).Scan(&list)
 	if list == nil { list = []map[string]interface{}{} }
 	app.OKWithCount(c, list, count)
 }
@@ -715,43 +737,58 @@ func SearchWithdraws(c *gin.Context) {
 	if req.Page < 1 { req.Page = 1 }
 	if req.Limit < 1 || req.Limit > 100 { req.Limit = 20 }
 
+	var args []interface{}
 	where := " WHERE 1=1"
 	if req.TransferNo != "" {
-		where += fmt.Sprintf(" AND w.transfer_no LIKE '%%%s%%'", req.TransferNo)
+		where += " AND w.transfer_no LIKE ?"
+		args = append(args, "%"+req.TransferNo+"%")
 	}
 	if req.Currency != "" {
-		where += fmt.Sprintf(" AND w.currency_type = '%s'", req.Currency)
+		where += " AND w.currency_type = ?"
+		args = append(args, req.Currency)
 	}
 	if req.AccountType != nil {
-		where += fmt.Sprintf(" AND w.account_type = %d", *req.AccountType)
+		where += " AND w.account_type = ?"
+		args = append(args, *req.AccountType)
 	}
 	if req.Username != "" {
-		where += fmt.Sprintf(" AND (u.nickname LIKE '%%%s%%' OR u.username LIKE '%%%s%%' OR u.mobile LIKE '%%%s%%')", req.Username, req.Username, req.Username)
+		where += " AND (u.nickname LIKE ? OR u.username LIKE ? OR u.mobile LIKE ?)"
+		kw := "%" + req.Username + "%"
+		args = append(args, kw, kw, kw)
 	}
 	if req.Account != "" {
-		where += fmt.Sprintf(" AND (w.account_id IN (SELECT id FROM withdraw_accounts WHERE account LIKE '%%%s%%' OR username LIKE '%%%s%%') OR w.user_id IN (SELECT id FROM users WHERE username LIKE '%%%s%%' OR nickname LIKE '%%%s%%'))",
-			req.Account, req.Account, req.Account, req.Account)
+		where += " AND (w.account_id IN (SELECT id FROM withdraw_accounts WHERE account LIKE ? OR username LIKE ?) OR w.user_id IN (SELECT id FROM users WHERE username LIKE ? OR nickname LIKE ?))"
+		kw := "%" + req.Account + "%"
+		args = append(args, kw, kw, kw, kw)
 	}
 	if req.Status != nil {
-		where += fmt.Sprintf(" AND w.status = %d", *req.Status)
+		where += " AND w.status = ?"
+		args = append(args, *req.Status)
 	}
 	if req.CreateStart != "" {
-		where += fmt.Sprintf(" AND w.created_at >= '%s'", padTime(req.CreateStart, false))
+		where += " AND w.created_at >= ?"
+		args = append(args, padTime(req.CreateStart, false))
 	}
 	if req.CreateEnd != "" {
-		where += fmt.Sprintf(" AND w.created_at <= '%s'", padTime(req.CreateEnd, true))
+		where += " AND w.created_at <= ?"
+		args = append(args, padTime(req.CreateEnd, true))
 	}
 	if req.UpdateStart != "" {
-		where += fmt.Sprintf(" AND w.updated_at >= '%s'", padTime(req.UpdateStart, false))
+		where += " AND w.updated_at >= ?"
+		args = append(args, padTime(req.UpdateStart, false))
 	}
 	if req.UpdateEnd != "" {
-		where += fmt.Sprintf(" AND w.updated_at <= '%s'", padTime(req.UpdateEnd, true))
+		where += " AND w.updated_at <= ?"
+		args = append(args, padTime(req.UpdateEnd, true))
 	}
 
+	args = append(args, req.Limit, (req.Page-1)*req.Limit)
 	var list []WithdrawWithUser
 	var count int64
-	repository.DB.Raw("SELECT count(*) FROM withdraws w" + where).Scan(&count)
-	repository.DB.Raw(fmt.Sprintf("SELECT w.*, u.nickname, u.mobile, a.username acct_username, a.account acct_account, a.bank acct_bank, a.phone acct_phone, a.qrcode acct_qrcode FROM withdraws w LEFT JOIN users u ON w.user_id = u.id LEFT JOIN withdraw_accounts a ON w.account_id = a.id%s ORDER BY w.id DESC LIMIT %d OFFSET %d", where, req.Limit, (req.Page-1)*req.Limit)).Scan(&list)
+	countSQL := "SELECT count(*) FROM withdraws w" + where
+	listSQL := "SELECT w.*, u.nickname, u.mobile, a.username acct_username, a.account acct_account, a.bank acct_bank, a.phone acct_phone, a.qrcode acct_qrcode FROM withdraws w LEFT JOIN users u ON w.user_id = u.id LEFT JOIN withdraw_accounts a ON w.account_id = a.id" + where + " ORDER BY w.id DESC LIMIT ? OFFSET ?"
+	repository.DB.Raw(countSQL, args[:len(args)-2]...).Scan(&count)
+	repository.DB.Raw(listSQL, args...).Scan(&list)
 	if list == nil { list = []WithdrawWithUser{} }
 	app.OKWithCount(c, list, count)
 }
@@ -864,29 +901,36 @@ func searchLogs(c *gin.Context, table string) {
 
 	uid, _ := req.UserID.Int64()
 
+	var args []interface{}
 	where := " WHERE 1=1"
 	if uid > 0 {
-		where += fmt.Sprintf(" AND user_id = %d", uid)
+		where += " AND user_id = ?"
+		args = append(args, uid)
 	}
 	if req.Type != nil {
-		where += fmt.Sprintf(" AND type = %d", *req.Type)
+		where += " AND type = ?"
+		args = append(args, *req.Type)
 	}
 	if req.Keyword != "" {
-		where += fmt.Sprintf(" AND memo LIKE '%%%s%%'", req.Keyword)
+		where += " AND memo LIKE ?"
+		args = append(args, "%"+req.Keyword+"%")
 	}
 	if req.Start != "" {
-		where += fmt.Sprintf(" AND created_at >= '%s'", padTime(req.Start, false))
+		where += " AND created_at >= ?"
+		args = append(args, padTime(req.Start, false))
 	}
 	if req.End != "" {
-		where += fmt.Sprintf(" AND created_at <= '%s'", padTime(req.End, true))
+		where += " AND created_at <= ?"
+		args = append(args, padTime(req.End, true))
 	}
 
 	var list []map[string]interface{}
 	var count int64
-	sql := fmt.Sprintf("SELECT l.*, u.nickname FROM %s l LEFT JOIN users u ON l.user_id = u.id%s ORDER BY l.id DESC LIMIT %d OFFSET %d",
-		table, where, req.Limit, (req.Page-1)*req.Limit)
-	repository.DB.Raw("SELECT count(*) FROM "+table+where).Scan(&count)
-	repository.DB.Raw(sql).Scan(&list)
+	countArgs := append([]interface{}{}, args...)
+	repository.DB.Raw("SELECT count(*) FROM "+table+where, countArgs...).Scan(&count)
+	fullArgs := append(args, req.Limit, (req.Page-1)*req.Limit)
+	sql := fmt.Sprintf("SELECT l.*, u.nickname FROM %s l LEFT JOIN users u ON l.user_id = u.id%s ORDER BY l.id DESC LIMIT ? OFFSET ?", table, where)
+	repository.DB.Raw(sql, fullArgs...).Scan(&list)
 	if list == nil { list = []map[string]interface{}{} }
 	app.OKWithCount(c, list, count)
 }

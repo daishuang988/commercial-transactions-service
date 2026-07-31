@@ -190,40 +190,52 @@ func SearchMerchandises(c *gin.Context) {
 	if req.Page < 1 { req.Page = 1 }
 	if req.Limit < 1 || req.Limit > 100 { req.Limit = 20 }
 
+	var args []interface{}
 	where := " WHERE 1=1"
 	if req.ID > 0 {
-		where += fmt.Sprintf(" AND id = %d", req.ID)
+		where += " AND id = ?"
+		args = append(args, req.ID)
 	}
 	if req.UserID > 0 {
-		where += fmt.Sprintf(" AND user_id = %d", req.UserID)
+		where += " AND user_id = ?"
+		args = append(args, req.UserID)
 	}
 	if req.Keyword != "" {
-		where += fmt.Sprintf(" AND title LIKE '%%%s%%'", req.Keyword)
+		where += " AND title LIKE ?"
+		args = append(args, "%"+req.Keyword+"%")
 	}
 	if req.IsShow != nil {
-		where += fmt.Sprintf(" AND is_show = %d", *req.IsShow)
+		where += " AND is_show = ?"
+		args = append(args, *req.IsShow)
 	}
 	if req.Status != nil {
-		where += fmt.Sprintf(" AND status = %d", *req.Status)
+		where += " AND status = ?"
+		args = append(args, *req.Status)
 	}
 	if req.CreateStart != "" {
-		where += fmt.Sprintf(" AND created_at >= '%s'", padTime(req.CreateStart, false))
+		where += " AND created_at >= ?"
+		args = append(args, padTime(req.CreateStart, false))
 	}
 	if req.CreateEnd != "" {
-		where += fmt.Sprintf(" AND created_at <= '%s'", padTime(req.CreateEnd, true))
+		where += " AND created_at <= ?"
+		args = append(args, padTime(req.CreateEnd, true))
 	}
 	if req.UpdateStart != "" {
-		where += fmt.Sprintf(" AND updated_at >= '%s'", padTime(req.UpdateStart, false))
+		where += " AND updated_at >= ?"
+		args = append(args, padTime(req.UpdateStart, false))
 	}
 	if req.UpdateEnd != "" {
-		where += fmt.Sprintf(" AND updated_at <= '%s'", padTime(req.UpdateEnd, true))
+		where += " AND updated_at <= ?"
+		args = append(args, padTime(req.UpdateEnd, true))
 	}
 
+	args = append(args, req.Limit, (req.Page-1)*req.Limit)
 	var list []model.Merchandise
 	var count int64
-	repository.DB.Raw("SELECT count(*) FROM merchandises" + where).Scan(&count)
-	repository.DB.Raw(fmt.Sprintf("SELECT * FROM merchandises%s ORDER BY id DESC LIMIT %d OFFSET %d",
-		where, req.Limit, (req.Page-1)*req.Limit)).Scan(&list)
+	countSQL := "SELECT count(*) FROM merchandises" + where
+	listSQL := "SELECT * FROM merchandises" + where + " ORDER BY id DESC LIMIT ? OFFSET ?"
+	repository.DB.Raw(countSQL, args[:len(args)-2]...).Scan(&count)
+	repository.DB.Raw(listSQL, args...).Scan(&list)
 	if list == nil { list = []model.Merchandise{} }
 	app.OKWithCount(c, list, count)
 }

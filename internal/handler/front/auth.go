@@ -86,7 +86,7 @@ func Register(c *gin.Context) {
 		Username:  req.Username,
 		Nickname:  req.Nickname,
 		Mobile:    req.Mobile,
-		Password:  utils.MD5Hash(req.Password + salt), // 兼容老格式
+		Password:  utils.MustHashPassword(req.Password),
 		Salt:      salt,
 		Sex:       0,
 		Avatar:    "/assets/img/avatar.png",
@@ -234,7 +234,7 @@ func RegisterV2(c *gin.Context) {
 		Username:  req.Mobile,
 		Nickname:  nickname,
 		Mobile:    req.Mobile,
-		Password:  utils.MD5Hash(req.Password + salt),
+		Password:  utils.MustHashPassword(req.Password),
 		Salt:      salt,
 		Sex:       0,
 		Avatar:    "/assets/img/avatar.png",
@@ -290,7 +290,7 @@ func ResetPassword(c *gin.Context) {
 	// 更新密码（兼容老格式 MD5+盐）
 	salt := utils.RandStr(6)
 	repository.DB.Model(&model.User{}).Where("id = ?", u.ID).Updates(map[string]interface{}{
-		"password":   utils.MD5Hash(req.NewPassword + salt),
+		"password":   utils.MustHashPassword(req.NewPassword),
 		"salt":       salt,
 		"updated_at": time.Now(),
 	})
@@ -375,7 +375,7 @@ func ChangePassword(c *gin.Context) {
 	// 更新密码（保持与现有格式一致：MD5+盐）
 	salt := utils.RandStr(6)
 	repository.DB.Model(&model.User{}).Where("id = ?", uid).Updates(map[string]interface{}{
-		"password":   utils.MD5Hash(req.NewPassword + salt),
+		"password":   utils.MustHashPassword(req.NewPassword),
 		"salt":       salt,
 		"updated_at": time.Now(),
 	})

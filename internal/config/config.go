@@ -12,10 +12,8 @@ type Config struct {
 	MySQL     MySQLConfig     `yaml:"mysql"`
 	Redis     RedisConfig     `yaml:"redis"`
 	JWT       JWTConfig       `yaml:"jwt"`
-	FlashSale FlashSaleConfig `yaml:"
-	
-	
-	"`
+	FlashSale FlashSaleConfig `yaml:"flash_sale"`
+	CORS      CORSConfig      `yaml:"cors"`
 }
 
 type ServerConfig struct {
@@ -63,6 +61,10 @@ type FlashSaleConfig struct {
 	BatchIntervalMs int `yaml:"batch_interval_ms"`
 }
 
+type CORSConfig struct {
+	AllowOrigin string `yaml:"allow_origin"`
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -102,6 +104,26 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.FlashSale.BatchIntervalMs == 0 {
 		cfg.FlashSale.BatchIntervalMs = 1000
+	}
+	if cfg.CORS.AllowOrigin == "" {
+		cfg.CORS.AllowOrigin = "*"
+	}
+
+	// 环境变量覆盖（生产环境不用改 yaml，直接设环境变量）
+	if v := os.Getenv("DB_PASSWORD"); v != "" {
+		cfg.MySQL.Password = v
+	}
+	if v := os.Getenv("REDIS_PASSWORD"); v != "" {
+		cfg.Redis.Password = v
+	}
+	if v := os.Getenv("JWT_SECRET"); v != "" {
+		cfg.JWT.Secret = v
+	}
+	if v := os.Getenv("SERVER_MODE"); v != "" {
+		cfg.Server.Mode = v
+	}
+	if v := os.Getenv("CORS_ORIGIN"); v != "" {
+		cfg.CORS.AllowOrigin = v
 	}
 	return cfg, nil
 }
