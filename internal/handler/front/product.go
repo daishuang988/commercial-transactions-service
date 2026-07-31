@@ -248,7 +248,7 @@ func BuyMerchandise(c *gin.Context) {
 		return
 	}
 	effectiveCap := userMaxOrder
-	if user.IsPriority == 1 {
+	if user.IsPriority == 1 && isInPriorityWindow() {
 		priorityCap := repository.GetConfigInt("priority_max_orders", 0)
 		if priorityCap > 0 && priorityCap < effectiveCap {
 			effectiveCap = priorityCap

@@ -101,6 +101,19 @@ func GetConfigInt(key string, defaultVal int) int {
 	return n
 }
 
+
+func isInPriorityWindow() bool {
+	now := time.Now().In(cstLocation)
+	advanceMin := GetConfigInt("priority_advance_minutes", 0)
+	if advanceMin <= 0 { return false }
+	startStr := getConfig("flash_sale_start")
+	if startStr == "" { return false }
+	var sh, sm int
+	fmt.Sscanf(startStr, "%d:%d", &sh, &sm)
+	normalStart := time.Date(now.Year(), now.Month(), now.Day(), sh, sm, 0, 0, cstLocation)
+	priorityStart := normalStart.Add(-time.Duration(advanceMin) * time.Minute)
+	return !now.Before(priorityStart) && now.Before(normalStart)
+}
 func FlashSaleTimeInfo() map[string]interface{} {
 	now := time.Now().In(cstLocation)
 	daysStr := getConfig("flash_sale_days")
@@ -124,6 +137,7 @@ func FlashSaleTimeInfo() map[string]interface{} {
 	}
 
 	inWindow := IsFlashSaleTime()
+	isOpen := inWindow || isInPriorityWindow()
 	startDay, endDay := parseDays(daysStr)
 
 	weekNames := []string{"周日", "周一", "周二", "周三", "周四", "周五", "周六"}
@@ -147,7 +161,7 @@ func FlashSaleTimeInfo() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"is_open":                  inWindow,
+		"is_open":                  isOpen,
 		"in_window":                inWindow,
 		"start_time":               fmt.Sprintf("%s %s:00", now.Format("2006-01-02"), startStr),
 		"end_time":                 fmt.Sprintf("%s %s:00", now.Format("2006-01-02"), endStr),

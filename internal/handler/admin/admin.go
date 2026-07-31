@@ -15,6 +15,7 @@ import (
 	"commercial-transactions-service/pkg/utils"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // ─── Dashboard ───
@@ -804,22 +805,30 @@ func ApproveWithdraw(c *gin.Context) {
 }
 
 func refundMoney(userID int64, currency string, amount float64) {
-	wallet, _ := repository.GetUserWallet(userID)
-	if wallet == nil { return }
 	now := time.Now()
 	switch currency {
 	case "coupon":
-		before := wallet.Coupon
-		after := before + amount
-		repository.DB.Exec(
-			"INSERT INTO coupon_logs (user_id,type,money,`before`,`after`,memo,created_at,updated_at) VALUES(?,1,?,?,?,?,?,?)",
-			userID, amount, before, after, "提现驳回退款", now, now)
+		repository.DB.Transaction(func(tx *gorm.DB) error {
+			var w model.UserWallet
+			if err := tx.Where("user_id = ?", userID).First(&w).Error; err != nil { return err }
+			before := w.Coupon
+			after := before + amount
+			sql := fmt.Sprintf("INSERT INTO coupon_logs (user_id,type,money,%cbefore%c,%cafter%c,memo,created_at,updated_at) VALUES(?,1,?,?,?,?,?,?)", '`', '`', '`', '`')
+			tx.Exec(sql, userID, amount, before, after, "提现驳回退款", now, now)
+			tx.Exec("UPDATE user_wallets SET coupon = ?, updated_at = NOW() WHERE user_id = ?", after, userID)
+			return nil
+		})
 	case "share_bonus":
-		before := wallet.ShareBonus
-		after := before + amount
-		repository.DB.Exec(
-			"INSERT INTO share_bonus_logs (user_id,type,money,`before`,`after`,memo,created_at,updated_at) VALUES(?,1,?,?,?,?,?,?)",
-			userID, amount, before, after, "提现驳回退款", now, now)
+		repository.DB.Transaction(func(tx *gorm.DB) error {
+			var w model.UserWallet
+			if err := tx.Where("user_id = ?", userID).First(&w).Error; err != nil { return err }
+			before := w.ShareBonus
+			after := before + amount
+			sql := fmt.Sprintf("INSERT INTO share_bonus_logs (user_id,type,money,%cbefore%c,%cafter%c,memo,created_at,updated_at) VALUES(?,1,?,?,?,?,?,?)", '`', '`', '`', '`')
+			tx.Exec(sql, userID, amount, before, after, "提现驳回退款", now, now)
+			tx.Exec("UPDATE user_wallets SET share_bonus = ?, updated_at = NOW() WHERE user_id = ?", after, userID)
+			return nil
+		})
 	}
 }
 

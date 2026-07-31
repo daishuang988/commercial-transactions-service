@@ -644,6 +644,7 @@ func ExportUsers(c *gin.Context) {
 	today := time.Now().In(repository.CSTLocation()).Format("01-02")
 
 	type ExportRow struct {
+		UserID         int64
 		Nickname       string
 		TodaySellTotal float64
 		TodayBuyTotal  float64
@@ -652,7 +653,7 @@ func ExportUsers(c *gin.Context) {
 	}
 	var rows []ExportRow
 	repository.DB.Raw(`
-		SELECT u.nickname,
+		SELECT u.id AS user_id, u.nickname,
 			COALESCE((SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.seller_id=u.id AND o.status=2 AND DATE(o.confirm_time)=CURDATE()), 0) AS today_sell_total,
 			COALESCE((SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.buyer_id=u.id AND o.status=2 AND DATE(o.confirm_time)=CURDATE()), 0) AS today_buy_total,
 			COALESCE(u.pid,0) AS parent_id,
@@ -664,18 +665,19 @@ func ExportUsers(c *gin.Context) {
 	f := excelize.NewFile()
 	sheet := "用户下单统计表" + time.Now().In(repository.CSTLocation()).Format("20060102")
 	f.SetSheetName("Sheet1", sheet)
-	headers := []string{"昵称", today + "卖货", today + "买货", "差额", "推广人ID", "推广人"}
+	headers := []string{"用户ID", "昵称", today + "卖货", today + "买货", "差额", "推广人ID", "推广人"}
 	for i, h := range headers { col, _ := excelize.CoordinatesToCellName(i+1, 1); f.SetCellValue(sheet, col, h) }
 	for i, r := range rows {
 		row := i + 2
-		f.SetCellValue(sheet, fmt.Sprintf("A%d", row), r.Nickname)
-		f.SetCellValue(sheet, fmt.Sprintf("B%d", row), r.TodaySellTotal)
-		f.SetCellValue(sheet, fmt.Sprintf("C%d", row), r.TodayBuyTotal)
-		f.SetCellValue(sheet, fmt.Sprintf("D%d", row), r.TodaySellTotal-r.TodayBuyTotal)
-		f.SetCellValue(sheet, fmt.Sprintf("E%d", row), r.ParentID)
-		f.SetCellValue(sheet, fmt.Sprintf("F%d", row), r.ParentNickname)
+		f.SetCellValue(sheet, fmt.Sprintf("A%d", row), r.UserID)
+		f.SetCellValue(sheet, fmt.Sprintf("B%d", row), r.Nickname)
+		f.SetCellValue(sheet, fmt.Sprintf("C%d", row), r.TodaySellTotal)
+		f.SetCellValue(sheet, fmt.Sprintf("D%d", row), r.TodayBuyTotal)
+		f.SetCellValue(sheet, fmt.Sprintf("E%d", row), r.TodaySellTotal-r.TodayBuyTotal)
+		f.SetCellValue(sheet, fmt.Sprintf("F%d", row), r.ParentID)
+		f.SetCellValue(sheet, fmt.Sprintf("G%d", row), r.ParentNickname)
 	}
-	autoWidth(f, sheet, 6)
+	autoWidth(f, sheet, 7)
 	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=用户下单统计表%s.xlsx", time.Now().In(repository.CSTLocation()).Format("20060102")))
 	f.Write(c.Writer)

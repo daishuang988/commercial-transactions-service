@@ -218,16 +218,19 @@ UPDATE merchandises SET image = REPLACE(image, '/uploads/', '/upload/image/');
         │
 2. 构建用户树（粉丝递归） → 确定迁移范围
         │
-3. 定向迁移脚本
+3. 定向迁移脚本（仅迁用户数据，不迁：系统配置/商品分类/商品模板/管理员/角色/菜单）
    ├─ 用户+钱包+合同（含 level/status/currency 映射）
    ├─ 订单（买方或卖方在树内即纳入）
    ├─ 寄售商品（树内用户 + 订单关联补全）
    ├─ 提现+收款账户
    └─ 财务日志
         │
-4. 密码重置 → UPDATE users SET password = MD5(CONCAT('123456', salt))
+4. 密码重置 + 合同清空
+	├─ UPDATE users SET password = MD5(CONCAT('123456', salt))
+	├─ DELETE FROM user_contracts
+	└─ UPDATE users SET contract = ''
         │
-5. 下载图片 → api.srdsmgs.com → 规范化路径 → 复制到 upload/
+5. 下载图片 → api.srdsmgs.com → 规范化路径 → 复制到 upload/，补充寄卖商品图
         │
 6. 管理端配配置 → 秒杀/交易/开关
         │

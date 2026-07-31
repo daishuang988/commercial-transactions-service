@@ -17,7 +17,7 @@ func queryLogs(c *gin.Context, table string) {
 	}
 
 	var list []map[string]interface{}
-	db.Order("id DESC").Limit(limit).Find(&list)
+	db.Order("created_at DESC, id DESC").Limit(limit).Find(&list)
 	if list == nil {
 		list = []map[string]interface{}{}
 	}
@@ -43,7 +43,7 @@ func WithdrawLogs(c *gin.Context) {
 
 	var list []map[string]interface{}
 	repository.DB.Table("withdraws").Where("user_id = ?", uid).
-		Order("id DESC").Limit(limit).Find(&list)
+		Order("created_at DESC, id DESC").Limit(limit).Find(&list)
 	if list == nil { list = []map[string]interface{}{} }
 	app.OK(c, list)
 }

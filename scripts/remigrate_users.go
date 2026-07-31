@@ -134,6 +134,16 @@ func main() {
 	}
 	db.QueryRow("SELECT u.id,u.username,u.nickname,w.self_bonus,u.today_buy_total,w.poor FROM users u JOIN user_wallets w ON u.id=w.user_id WHERE u.id=99929").Scan(&sample.ID, &sample.Username, &sample.Nickname, &sample.SB, &sample.TBT, &sample.Poor)
 	fmt.Printf("\n  抽查 99929 %s %s: self_bonus=%.3f today_buy=%.2f poor=%.2f\n", sample.Username, sample.Nickname, sample.SB, sample.TBT, sample.Poor)
+
+	// 老系统合同PDF不可迁移，清空合同状态，用户需重新签订
+	fmt.Println("\n========== 清空合同 ==========")
+	db.Exec("DELETE FROM user_contracts")
+	db.Exec("UPDATE users SET contract = ''")
+	var cc int64
+	db.QueryRow("SELECT COUNT(*) FROM user_contracts").Scan(&cc)
+	var uc int64
+	db.QueryRow("SELECT COUNT(*) FROM users WHERE contract != ''").Scan(&uc)
+	fmt.Printf("  合同记录: %d 条 | 用户contract非空: %d 人\n", cc, uc)
 }
 
 func toStr(v interface{}) string {

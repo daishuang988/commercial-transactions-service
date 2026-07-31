@@ -235,7 +235,7 @@ func ListWithdraws(page, limit int, status *int8) ([]model.Withdraw, int64, erro
 		db = db.Where("status = ?", *status)
 	}
 	db.Count(&count)
-	err := db.Order("id DESC").Offset((page-1)*limit).Limit(limit).Find(&list).Error
+	err := db.Order("created_at DESC, id DESC").Offset((page-1)*limit).Limit(limit).Find(&list).Error
 	return list, count, err
 }
 

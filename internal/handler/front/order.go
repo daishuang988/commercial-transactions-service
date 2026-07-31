@@ -180,7 +180,7 @@ func ResellOrder(c *gin.Context) {
 		return
 	}
 
-	// 寄卖窗口检查（格式: "00:00-14:45"）
+	// 寄卖窗口检查（格式: "14:45-00:00"，支持跨天，结束<开始表示结束在次日）
 	deadlineStr := repository.GetConfigStr("resell_deadline")
 	if deadlineStr != "" {
 		var sh, sm, eh, em int
@@ -188,7 +188,10 @@ func ResellOrder(c *gin.Context) {
 			now := time.Now().In(repository.CSTLocation())
 			start := time.Date(now.Year(), now.Month(), now.Day(), sh, sm, 0, 0, repository.CSTLocation())
 			end := time.Date(now.Year(), now.Month(), now.Day(), eh, em, 0, 0, repository.CSTLocation())
-			if now.Before(start) || now.After(end) {
+			if eh*60+em <= sh*60+sm {
+				end = end.Add(24 * time.Hour) // 跨天
+			}
+			if now.Before(start) || !now.Before(end) {
 				app.BadRequest(c, fmt.Sprintf("寄卖窗口为 %s，当前不可寄卖", deadlineStr))
 				return
 			}
@@ -234,11 +237,7 @@ func ResellOrder(c *gin.Context) {
 
 	// 标记订单已寄卖
 	repository.DB.Model(&model.Order{}).Where("id = ?", id).Update("is_resell", int8(1))
-	if splitCount > 1 {
-		app.OK(c, gin.H{"msg": fmt.Sprintf("寄卖申请已提交，已自动拆分为%d单", splitCount)})
-	} else {
-		app.OK(c, gin.H{"msg": "寄卖申请已提交"})
-	}
+	app.OK(c, gin.H{"msg": "寄卖申请已提交"})
 }
 
 func parseRate(s string) float64 {
@@ -354,6 +353,10 @@ func CancelOrder(c *gin.Context) {
 	repository.DB.Model(&model.Merchandise{}).Where("id = ?", o.MerchandiseID).Updates(map[string]interface{}{
 		"status": int8(0), "is_show": int8(1), "updated_at": now,
 	})
+
+	// 还原当日抢购计数
+	todayKey := fmt.Sprintf("flash:user:daily:%d:%s", uid, now.Format("20060102"))
+	repository.RDB.Decr(c.Request.Context(), todayKey)
 
 	app.OK(c, gin.H{"msg": "订单已取消"})
 }

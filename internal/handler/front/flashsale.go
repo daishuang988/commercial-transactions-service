@@ -279,10 +279,10 @@ func isInPriorityWindow() bool {
 	var sh, sm, eh, em int
 	fmt.Sscanf(startStr, "%d:%d", &sh, &sm)
 	fmt.Sscanf(endStr, "%d:%d", &eh, &em)
-	priorityStart := time.Date(now.Year(), now.Month(), now.Day(), sh, sm, 0, 0, repository.CSTLocation()).
-		Add(-time.Duration(advanceMin) * time.Minute)
-	normalEnd := time.Date(now.Year(), now.Month(), now.Day(), eh, em, 0, 0, repository.CSTLocation())
-	return !now.Before(priorityStart) && now.Before(normalEnd)
+	normalStart := time.Date(now.Year(), now.Month(), now.Day(), sh, sm, 0, 0, repository.CSTLocation())
+	priorityStart := normalStart.Add(-time.Duration(advanceMin) * time.Minute)
+	// 优先窗口仅在正常抢购开始前的那段提前时间
+	return !now.Before(priorityStart) && now.Before(normalStart)
 }
 
 // FlashSaleRemaining 剩余可抢次数 GET /api/v1/front/flash-sale/remaining
