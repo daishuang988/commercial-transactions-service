@@ -23,6 +23,12 @@ jwt:
   secret: "flash-sale-secret-key-change-in-production"
   expire_hours: 2
 
+sms:
+  access_key_id: ""
+  access_key_secret: ""
+  sign_name: "河北雄安通瑞辰商贸"
+  template_code: "SMS_511510148"
+
 flash_sale:
   max_per_user: 1
   worker_count: 10

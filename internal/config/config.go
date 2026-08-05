@@ -14,6 +14,14 @@ type Config struct {
 	JWT       JWTConfig       `yaml:"jwt"`
 	FlashSale FlashSaleConfig `yaml:"flash_sale"`
 	CORS      CORSConfig      `yaml:"cors"`
+	SMS       SMSConfig       `yaml:"sms"`
+}
+
+type SMSConfig struct {
+	AccessKeyID     string `yaml:"access_key_id"`
+	AccessKeySecret string `yaml:"access_key_secret"`
+	SignName        string `yaml:"sign_name"`
+	TemplateCode    string `yaml:"template_code"`
 }
 
 type ServerConfig struct {
@@ -121,6 +129,12 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("SERVER_MODE"); v != "" {
 		cfg.Server.Mode = v
+	}
+	if v := os.Getenv("SMS_ACCESS_KEY_ID"); v != "" {
+		cfg.SMS.AccessKeyID = v
+	}
+	if v := os.Getenv("SMS_ACCESS_KEY_SECRET"); v != "" {
+		cfg.SMS.AccessKeySecret = v
 	}
 	if v := os.Getenv("CORS_ORIGIN"); v != "" {
 		cfg.CORS.AllowOrigin = v

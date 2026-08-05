@@ -11,14 +11,25 @@ import (
 	"commercial-transactions-service/internal/model"
 	"commercial-transactions-service/internal/repository"
 	"commercial-transactions-service/pkg/app"
+	"commercial-transactions-service/pkg/sms"
 	"commercial-transactions-service/pkg/utils"
 
 	"github.com/gin-gonic/gin"
 )
 
 var Cfg *config.Config
+var SMSClient *sms.Client
 
-func Init(cfg *config.Config) { Cfg = cfg }
+func Init(cfg *config.Config) {
+	Cfg = cfg
+	if cfg.SMS.AccessKeyID != "" && cfg.SMS.AccessKeySecret != "" {
+		var err error
+		SMSClient, err = sms.NewClient(cfg.SMS.AccessKeyID, cfg.SMS.AccessKeySecret, cfg.SMS.SignName, cfg.SMS.TemplateCode)
+		if err != nil {
+			fmt.Printf("短信服务初始化失败: %v\n", err)
+		}
+	}
+}
 
 // Login 用户登录 POST /api/v1/front/auth/login
 func Login(c *gin.Context) {
@@ -119,13 +130,23 @@ func Register(c *gin.Context) {
 // ─── 验证码 & 短信 ───
 
 var (
-	captchaStore = sync.Map{} // captcha_id → answer
-	smsStore     = sync.Map{} // mobile → {code, expire}
+	captchaStore  = sync.Map{} // captcha_id → answer
+	smsStore      = sync.Map{} // mobile → {code, expire, dailyCount, dailyDate}
+	smsIPLimiter  = make(map[string]*ipCounter) // IP → 计数
+	smsIPMu       sync.Mutex
+	smsCleanTimer *time.Timer
 )
 
 type smsRecord struct {
-	Code   string
-	Expire time.Time
+	Code       string
+	Expire     time.Time
+	DailyCount int
+	DailyDate  string // 2006-01-02
+}
+
+type ipCounter struct {
+	Count  int
+	Hour   int // 当前小时
 }
 
 // Captcha 获取图形验证码 GET /api/v1/front/captcha
@@ -159,23 +180,76 @@ func SendSMS(c *gin.Context) {
 		return
 	}
 
-	// 检查60秒内是否已发送
+	today := time.Now().Format("2006-01-02")
+
+	// 检查60秒内是否已发送 及 每日上限5条
 	if v, ok := smsStore.Load(req.Mobile); ok {
 		r := v.(smsRecord)
 		if time.Now().Before(r.Expire.Add(-4 * time.Minute)) {
 			app.TooManyRequests(c, "60秒内已发送，请稍后再试")
 			return
 		}
+		// 每日上限：同一天内每天最多5条
+		if r.DailyDate == today && r.DailyCount >= 5 {
+			app.TooManyRequests(c, "今日发送次数已达上限，请明天再试")
+			return
+		}
 	}
 
-	if repository.GetConfigInt("sms_verify", 0) == 1 {
-		// TODO: 接入真实接码平台
-		app.InternalError(c, "短信服务未接入")
-		return
+	// IP每小时限流10次
+	ip := c.ClientIP()
+	smsIPMu.Lock()
+	nowHour := time.Now().Hour()
+	if ic, exists := smsIPLimiter[ip]; exists {
+		if ic.Hour != nowHour {
+			ic.Hour = nowHour
+			ic.Count = 0
+		}
+		if ic.Count >= 10 {
+			smsIPMu.Unlock()
+			app.TooManyRequests(c, "操作频繁，请稍后再试")
+			return
+		}
+		ic.Count++
+	} else {
+		smsIPLimiter[ip] = &ipCounter{Count: 1, Hour: nowHour}
 	}
+	smsIPMu.Unlock()
+
 	code := "1234"
-	smsStore.Store(req.Mobile, smsRecord{Code: code, Expire: time.Now().Add(5 * time.Minute)})
-	app.OK(c, gin.H{"msg": "验证码已发送", "code": code, "expire": "5分钟"})
+	if repository.GetConfigInt("sms_verify", 0) == 1 {
+		if SMSClient == nil {
+			app.InternalError(c, "短信服务未配置")
+			return
+		}
+		var err error
+		code, err = SMSClient.SendCode(req.Mobile)
+		if err != nil {
+			fmt.Printf("发送短信失败: %v\n", err)
+			app.InternalError(c, "短信发送失败，请稍后再试")
+			return
+		}
+	}
+
+	// 更新每日计数
+	dailyCount := 1
+	if v, ok := smsStore.Load(req.Mobile); ok {
+		r := v.(smsRecord)
+		if r.DailyDate == today {
+			dailyCount = r.DailyCount + 1
+		}
+	}
+	smsStore.Store(req.Mobile, smsRecord{
+		Code: code, Expire: time.Now().Add(5 * time.Minute),
+		DailyCount: dailyCount, DailyDate: today,
+	})
+
+	// sms_verify=1 时不返回验证码
+	resp := gin.H{"msg": "验证码已发送", "expire": "5分钟"}
+	if repository.GetConfigInt("sms_verify", 0) == 0 {
+		resp["code"] = code
+	}
+	app.OK(c, resp)
 }
 
 
@@ -196,10 +270,13 @@ func RegisterV2(c *gin.Context) {
 		return
 	}
 
-	// 短信校验开关: 0=关闭(跳过验证) 1=开启(需验证码1234)
-	if repository.GetConfigInt("sms_verify", 0) == 1 {
-		if req.SmsCode != "1234" {
-			app.BadRequest(c, "验证码错误")
+	// 短信校验: 关闭时跳过，开启时验证smsStore中的动态验证码
+	if repository.GetConfigInt("sms_verify", 0) == 0 {
+		// 未开启短信验证，跳过
+	} else {
+		v, ok := smsStore.Load(req.Mobile)
+		if !ok || req.SmsCode != v.(smsRecord).Code || time.Now().After(v.(smsRecord).Expire) {
+			app.BadRequest(c, "验证码错误或已过期")
 			return
 		}
 	}
@@ -272,10 +349,13 @@ func ResetPassword(c *gin.Context) {
 		return
 	}
 
-	// 短信校验开关
-	if repository.GetConfigInt("sms_verify", 0) == 1 {
-		if req.SmsCode != "1234" {
-			app.BadRequest(c, "验证码错误")
+	// 短信校验: 关闭时跳过，开启时验证smsStore中的动态验证码
+	if repository.GetConfigInt("sms_verify", 0) == 0 {
+		// 未开启短信验证，跳过
+	} else {
+		v, ok := smsStore.Load(req.Mobile)
+		if !ok || req.SmsCode != v.(smsRecord).Code || time.Now().After(v.(smsRecord).Expire) {
+			app.BadRequest(c, "验证码错误或已过期")
 			return
 		}
 	}

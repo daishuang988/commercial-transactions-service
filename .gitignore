@@ -26,3 +26,11 @@ output/
 # 老系统迁移数据(超大文件)
 tools/old_system_migration/output/
 tools/old_system_migration/output_new/
+.ssh_key_deploy
+tools/old_system_migration/output_new2/
+server
+server.exe
+tools/*.sql
+tools/*.txt
+tools/*_stderr.txt
+tools/import_*.go

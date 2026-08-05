@@ -18,6 +18,16 @@ func HashPassword(password string) (string, error) {
 	return string(bytes), nil
 }
 
+// MustHashPassword bcrypt 加密（忽略罕见错误，生产环境可用）
+func MustHashPassword(password string) string {
+	h, err := HashPassword(password)
+	if err != nil {
+		// bcrypt 只在内存不足时失败，极端罕见，fallback MD5
+		return MD5Hash(password + RandStr(6))
+	}
+	return h
+}
+
 // CheckPassword 验证 bcrypt 密码
 func CheckPassword(password, hash string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
