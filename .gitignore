@@ -28,9 +28,11 @@ tools/old_system_migration/output/
 tools/old_system_migration/output_new/
 .ssh_key_deploy
 tools/old_system_migration/output_new2/
-server
-server.exe
+/server
+/server_*
+/server.exe
 tools/*.sql
 tools/*.txt
 tools/*_stderr.txt
 tools/import_*.go
+docs/服务器/
