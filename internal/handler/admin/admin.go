@@ -341,95 +341,112 @@ func Recharge(c *gin.Context) {
 		return
 	}
 
-	// 查当前余额
-	wallet, err := repository.GetUserWallet(id)
+	// 事务：查余额+更新+写日志，防止并发和部分失败
+	var beforeBalance, afterBalance float64
+	err := repository.DB.Transaction(func(tx *gorm.DB) error {
+		// 行锁读余额
+		var wallet struct {
+			Money      float64
+			Coupon     float64
+			SelfBonus  float64
+			ShareBonus float64
+		}
+		if err := tx.Raw("SELECT money, coupon, self_bonus, share_bonus FROM user_wallets WHERE user_id = ? FOR UPDATE", id).Scan(&wallet).Error; err != nil {
+			return err
+		}
+
+		var current float64
+		switch req.Currency {
+		case "money":
+			current = wallet.Money
+		case "coupon":
+			current = wallet.Coupon
+		case "self_bonus":
+			current = wallet.SelfBonus
+		case "share_bonus":
+			current = wallet.ShareBonus
+		}
+
+		// 减少时不允许小于0
+		if req.OpType == "sub" {
+			if current <= 0 {
+				return fmt.Errorf("%s为0，无法减少", cnName)
+			}
+			if req.Amount > current {
+				return fmt.Errorf("%s不足（当前%.2f）", cnName, current)
+			}
+		}
+
+		after := current + req.Amount
+		if req.OpType == "sub" {
+			after = current - req.Amount
+		}
+		beforeBalance = current
+		afterBalance = after
+
+		var updateField string
+		switch req.Currency {
+		case "money":
+			updateField = "money"
+		case "coupon":
+			updateField = "coupon"
+		case "self_bonus":
+			updateField = "self_bonus"
+		case "share_bonus":
+			updateField = "share_bonus"
+		}
+
+		if err := tx.Model(&model.UserWallet{}).Where("user_id = ?", id).Update(updateField, after).Error; err != nil {
+			return err
+		}
+
+		// 写日志
+		logType := int64(1) // 收入
+		if req.OpType == "sub" {
+			logType = 2 // 支出
+		}
+
+		desc := req.Desc
+		if desc == "" {
+			opLabel := "增加"
+			if req.OpType == "sub" {
+				opLabel = "减少"
+			}
+			desc = fmt.Sprintf("管理员%s%s", opLabel, cnName)
+		}
+
+		var logTable string
+		switch req.Currency {
+		case "coupon":
+			logTable = "coupon_logs"
+		case "self_bonus":
+			logTable = "self_bonus_logs"
+		case "share_bonus":
+			logTable = "share_bonus_logs"
+		case "money":
+			logTable = "money_logs"
+		}
+
+		return tx.Exec(
+			"INSERT INTO "+logTable+" (user_id,type,money,`before`,`after`,memo,created_at,updated_at) VALUES(?,?,?,?,?,?,NOW(),NOW())",
+			id, logType, req.Amount, current, after, desc).Error
+	})
+
 	if err != nil {
-		app.NotFound(c, "用户钱包不存在")
+		if strings.Contains(err.Error(), "不足") || strings.Contains(err.Error(), "为0") {
+			app.Fail(c, app.ErrCodeBalanceNotEnough, err.Error())
+		} else {
+			app.InternalError(c, "操作失败，请重试")
+		}
 		return
 	}
 
-	var currentBalance float64
-	switch req.Currency {
-	case "money":
-		currentBalance = wallet.Money
-	case "coupon":
-		currentBalance = wallet.Coupon
-	case "self_bonus":
-		currentBalance = wallet.SelfBonus
-	case "share_bonus":
-		currentBalance = wallet.ShareBonus
-	}
-
-	// 减少时不允许小于0
-	if req.OpType == "sub" {
-		if currentBalance <= 0 {
-			app.Fail(c, app.ErrCodeBalanceNotEnough, cnName+"为0，无法减少")
-			return
-		}
-		if req.Amount > currentBalance {
-			app.Fail(c, app.ErrCodeBalanceNotEnough, fmt.Sprintf("%s不足（当前%.2f）", cnName, currentBalance))
-			return
-		}
-	}
-
-	// 执行更新
-	newBalance := currentBalance + req.Amount
-	if req.OpType == "sub" {
-		newBalance = currentBalance - req.Amount
-	}
-
-	var updateField string
-	switch req.Currency {
-	case "money":
-		updateField = "money"
-	case "coupon":
-		updateField = "coupon"
-	case "self_bonus":
-		updateField = "self_bonus"
-	case "share_bonus":
-		updateField = "share_bonus"
-	}
-
-	repository.DB.Model(&model.UserWallet{}).Where("user_id = ?", id).
-		Update(updateField, newBalance).
-		Update("updated_at", time.Now())
-
-	// 写日志
-	logType := int64(1) // 收入
-	if req.OpType == "sub" {
-		logType = 2 // 支出
-	}
-
-	desc := req.Desc
-	if desc == "" {
-		opLabel := "增加"
-		if req.OpType == "sub" {
-			opLabel = "减少"
-		}
-		desc = fmt.Sprintf("管理员%s%s", opLabel, cnName)
-	}
-
-	switch req.Currency {
-	case "coupon":
-		repository.DB.Exec("INSERT INTO coupon_logs (user_id,type,money,`before`,`after`,memo,created_at,updated_at) VALUES(?,?,?,?,?,?,NOW(),NOW())",
-			id, logType, req.Amount, currentBalance, newBalance, desc)
-	case "self_bonus":
-		repository.DB.Exec("INSERT INTO self_bonus_logs (user_id,type,money,`before`,`after`,memo,created_at,updated_at) VALUES(?,?,?,?,?,?,NOW(),NOW())",
-			id, logType, req.Amount, currentBalance, newBalance, desc)
-	case "share_bonus":
-		repository.DB.Exec("INSERT INTO share_bonus_logs (user_id,type,money,`before`,`after`,memo,created_at,updated_at) VALUES(?,?,?,?,?,?,NOW(),NOW())",
-			id, logType, req.Amount, currentBalance, newBalance, desc)
-	case "money":
-		repository.DB.Exec("INSERT INTO money_logs (user_id,type,money,`before`,`after`,memo,created_at,updated_at) VALUES(?,?,?,?,?,?,NOW(),NOW())",
-			id, logType, req.Amount, currentBalance, newBalance, desc)
-	}
-
 	app.OK(c, gin.H{
-		"currency":  req.Currency,
-		"op_type":   req.OpType,
-		"amount":    req.Amount,
-		"before":    currentBalance,
-		"after":     newBalance,
+		"currency": req.Currency,
+		"op_type":  req.OpType,
+		"amount":   req.Amount,
+		"before":   beforeBalance,
+		"after":    afterBalance,
 	})
 }
 

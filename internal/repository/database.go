@@ -30,15 +30,20 @@ func InitMySQL(cfg *config.MySQLConfig) {
 	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
 	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
 	sqlDB.SetConnMaxLifetime(time.Hour)
+	sqlDB.SetConnMaxIdleTime(10 * time.Minute)
 	log.Println("MySQL 连接成功")
 }
 
 func InitRedis(cfg *config.RedisConfig) {
 	RDB = redis.NewClient(&redis.Options{
-		Addr:     cfg.Addr(),
-		Password: cfg.Password,
-		DB:       cfg.DB,
-		PoolSize: cfg.PoolSize,
+		Addr:         cfg.Addr(),
+		Password:     cfg.Password,
+		DB:           cfg.DB,
+		PoolSize:     cfg.PoolSize,
+		DialTimeout:  5 * time.Second,
+		ReadTimeout:  3 * time.Second,
+		WriteTimeout: 3 * time.Second,
+		MinIdleConns: 10,
 	})
 	if err := RDB.Ping(context.Background()).Err(); err != nil {
 		log.Printf("⚠️ Redis未连接（秒杀功能暂不可用）: %v", err)
