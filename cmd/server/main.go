@@ -248,7 +248,13 @@ func main() {
 	}
 
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
-	srv := &http.Server{Addr: addr, Handler: r}
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      r,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
 
 	go func() {
 		log.Printf("🚀 服务启动: %s", addr)
