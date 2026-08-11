@@ -41,7 +41,7 @@ type MySQLConfig struct {
 }
 
 func (m MySQLConfig) DSN() string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=true&loc=Local",
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=true&loc=Local&timeout=5s&readTimeout=10s&writeTimeout=10s",
 		m.User, m.Password, m.Host, m.Port, m.Database, m.Charset)
 }
 
@@ -87,10 +87,10 @@ func Load(path string) (*Config, error) {
 		cfg.Server.Port = 8080
 	}
 	if cfg.Server.Mode == "" {
-		cfg.Server.Mode = "debug"
+		cfg.Server.Mode = "release"
 	}
 	if cfg.MySQL.MaxOpenConns == 0 {
-		cfg.MySQL.MaxOpenConns = 200
+		cfg.MySQL.MaxOpenConns = 120
 	}
 	if cfg.MySQL.MaxIdleConns == 0 {
 		cfg.MySQL.MaxIdleConns = 50
