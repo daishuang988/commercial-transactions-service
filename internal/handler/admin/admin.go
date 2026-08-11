@@ -396,7 +396,9 @@ func Recharge(c *gin.Context) {
 			updateField = "share_bonus"
 		}
 
-		if err := tx.Model(&model.UserWallet{}).Where("user_id = ?", id).Update(updateField, after).Error; err != nil {
+		if err := tx.Model(&model.UserWallet{}).Where("user_id = ?", id).
+			Update(updateField, after).
+			Update("updated_at", time.Now()).Error; err != nil {
 			return err
 		}
 
