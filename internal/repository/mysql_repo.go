@@ -66,11 +66,10 @@ func ListUsers(req model.UserListReq) ([]UserWithWallet, int64, error) {
 	var count int64
 
 	// 资金字段从 user_wallets 直读
-	// 今日/昨日买卖从订单表实时算
+	// 今日买卖实时算，昨日卖用存储快照（每天23:59结算时固化）
 	subTodayBuy := "(SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.buyer_id = u.id AND o.status = 2 AND DATE(o.confirm_time) = CURDATE())"
 	subTodayBuyCnt := "(SELECT COUNT(*) FROM orders o WHERE o.buyer_id = u.id AND o.status = 2 AND DATE(o.confirm_time) = CURDATE())"
 	subTodaySell := "(SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.seller_id = u.id AND o.status = 2 AND DATE(o.confirm_time) = CURDATE())"
-	subYestSellCnt := "(SELECT COUNT(*) FROM orders o WHERE o.seller_id = u.id AND o.status = 2 AND DATE(o.confirm_time) = DATE_SUB(CURDATE(), INTERVAL 1 DAY))"
 
 	selectSQL := fmt.Sprintf(`u.*,
 		COALESCE(w.money,0) money,
@@ -82,8 +81,8 @@ func ListUsers(req model.UserListReq) ([]UserWithWallet, int64, error) {
 		COALESCE((%s), u.today_buy_total) today_buy_total,
 		COALESCE((%s), u.today_buy_count) today_buy_count,
 		COALESCE((%s), u.today_sell_total) today_sell_total,
-		COALESCE((%s), u.yesterday_sell_count) yesterday_sell_count`,
-		subTodayBuy, subTodayBuyCnt, subTodaySell, subYestSellCnt)
+		u.yesterday_sell_count`,
+		subTodayBuy, subTodayBuyCnt, subTodaySell)
 
 	db := DB.Table("users u").
 		Select(selectSQL).

@@ -180,6 +180,14 @@ func ResellOrder(c *gin.Context) {
 		return
 	}
 
+	// 用户寄卖权限检查
+	var isResell int8
+	repository.DB.Table("users").Select("is_resell").Where("id=?", uid).Scan(&isResell)
+	if isResell != 1 {
+		app.BadRequest(c, "未到寄卖时间")
+		return
+	}
+
 	// 寄卖窗口检查（格式: "14:45-00:00"，支持跨天，结束<开始表示结束在次日）
 	deadlineStr := repository.GetConfigStr("resell_deadline")
 	if deadlineStr != "" {
