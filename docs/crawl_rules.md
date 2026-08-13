@@ -264,6 +264,79 @@ mysql -h127.0.0.1 -uroot -p flash_sale < output_import/01_users.sql  # ... 依�
 
 ---
 
+## 八、重新爬取重导完整步骤（2026-08-15 执行）
+
+老系统数据每天结算一次（23:59 结算、约 00:05 落库），**必须凌晨结算完成后爬取**，否则当天"今日收益"缺失。2026-08-14 曾测试产生脏数据（订单 429156/429157、商品 407944/407945、exchange_orders 18、407258 被改状态/标题），重导前必须清理。
+
+### 第 0 步：清理上一轮数据（服务器 DB）
+
+1. **先备份现状**到 /opt/app/import_94694/（动生产数据先备份）
+2. 清测试脏数据：`DELETE FROM orders WHERE id IN (429156,429157)`；`DELETE FROM merchandises WHERE id IN (407944,407945)`；`DELETE FROM exchange_orders WHERE id=18`；407258 恢复 status=0、标题去掉"-测试"
+3. 删除上一轮导入的树内数据（users 树内 655 人及其 wallets/merchandises/orders/withdraws/withdraw_accounts/三类流水/合同），关外键执行，范围与用户确认后删
+4. 清 Redis 测试计数：`DEL flash:user:daily:100465:* flash:user:daily:99990:*` 及当天其他测试 key
+
+### 第 1 步：爬取（凌晨 00:05 后）
+
+```bash
+cd tools/old_system_migration
+./output/crawl.exe -fullsync -api-list apis.txt -cookie "PHPSID=xxx" -output ./output_new2
+```
+
+爬虫只管爬不动库，爬完**重算粉丝树核对人数**（上次漏了 23:19 新注册的 100507 付洪亮）：
+
+```bash
+go build -o fan_tree_write.exe fan_tree_write.go
+./fan_tree_write.exe output_new2/data/user_select_FULL.json 94694 fan_tree_ids.txt
+```
+
+爬完汇报，等用户指令。
+
+### 第 2 步：JSON→SQL
+
+```bash
+go build -o import_tree.exe import_tree.go
+./import_tree.exe fan_tree_ids.txt output_new2/data output_import
+```
+
+Go 脚本只做 JSON→SQL 转换**不连库**。生成 01_users 02_user_wallets 03_merchandises 04_orders 05_withdraw_accounts 06_withdraws 07_self_bonus_logs 08_share_bonus_logs 09_coupon_logs。SQL 生成阶段直接内置：密码 `MD5(CONCAT('123456', salt))`、清合同、**status 反转（status_new = 1 - status_old）**、已完成订单 coupon_settled=1、提现 0/1/2→2/1/3、cate 2/4→coupon/share_bonus、level 1/2/3→0/1/2、图片路径 /uploads/→/upload/image/、树外卖家商品 15,047 件 status=1 一并导入（订单 JOIN 展示需要）。
+
+### 第 3 步：导入（按编号顺序）
+
+```bash
+mysql -h127.0.0.1 -uroot -p flash_sale < output_import/01_users.sql  # ... 依次到 09
+```
+
+每文件头已含 SET FOREIGN_KEY_CHECKS=0。
+
+### 第 4 步：导入后处理
+
+1. **商品标准化**（重导后必须重做）：寄卖池 + 未寄卖(is_resell=0)订单关联的商品，图/标题统一为「不锈钢锅+锌泉水杯实用套装」（图 /upload/image/20260814013409.jpg，先备份）
+2. **图片同步**（上次未做）：download_images.exe 下载老系统图片（用 api.srdsmgs.com，www 有防盗链 403），复制到服务器 upload 目录，DB 路径规范化
+
+### 第 5 步：验证
+
+- [ ] 各表条数本地与服务器一致
+- [ ] 树内用户登录 123456（13716057283 袁小华、13699190269 付洪亮）
+- [ ] 寄卖池 = 树内未售；管理端待售/已售数 = 老系统口径（老系统全部未售 = 树内未售 + 树外未导入）
+- [ ] 23:59 结算跑完无重复结算（coupon_logs 无重复新增）
+- [ ] 订单商品覆盖率（悬空引用 = 老系统已删商品，正常）
+- [ ] 卖方仓库 mine=1 接口正常（后端已就绪，前端由前端同事负责）
+
+### 吃过的亏（别吃第二次）
+
+1. **status 语义相反**：老 0=已售/1=未售，必须反转导入；判定只看 status 不看订单
+2. **不反转**= 21,425 件已售变待售进池、536 件未售被隐藏（首轮事故）
+3. **已完成订单不置 coupon_settled=1** = 23:59 重复发"今日收益"
+4. **结算前爬** = 当天今日收益缺失
+5. **爬完不算粉丝树** = 漏新注册用户（100507）
+6. **树外商品不导** = 订单详情商品信息为空（先删后恢复过一次）
+7. **不重置密码/不清合同** = 老密码保留、老合同带入（违反规则）
+8. **测试数据不清** = 残留脏订单/商品，重导前必须清+备份
+9. **account_info 用字符串匹配解析** = 失败，必须 encoding/json
+10. **Go 脚本连库** = 禁止，只 JSON→SQL，写入由 MySQL CLI 执行
+
+---
+
 ## 七、核心原则
 1. **用户没说的，一个字都别多做**
 2. **遇到外键报错先问，别自己建占位数据**
