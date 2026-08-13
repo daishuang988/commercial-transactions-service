@@ -126,11 +126,14 @@ UPDATE users SET contract = '';
 
 订单关联的寄售商品如果不在已迁移商品中，从老系统全量商品数据补入（临时禁用 `fk_merch_user` 外键）。
 
+订单关联的树外卖家商品也需补入（订单详情 LEFT JOIN merchandises 显示商品信息，不筛 status/is_show），并按新系统语义置 `status=1（已售）+ is_show=1`——寄卖池只筛 `status=0 AND is_show=1`，已售商品天然不进入售卖列表。
+
 迁移后验证：
 ```sql
 -- 订单商品覆盖率
 SELECT COUNT(*) FROM orders WHERE merchandise_id NOT IN (SELECT id FROM merchandises);
--- 应为 0
+-- 理想为 0；>0 时先查这些 merchandise_id 是否老系统本就已删除（悬空引用）
+-- 老系统删过商品属常态，订单保留原 id 悬空即可，管理端商品信息为空属正常，不用补
 ```
 
 ---
@@ -241,3 +244,5 @@ UPDATE merchandises SET image = REPLACE(image, '/uploads/', '/upload/image/');
    ├─ 提现状态/货币类型正确
    └─ 新建商品→购买→付款→确认→寄卖 走通
 ```
+
+> 实际执行记录（2026-08-14，94694 袁小华全粉丝树 655 人）：工具链、导入量、踩坑与决策反复见 [crawl_rules.md 第六节](crawl_rules.md#六94694-全粉丝树导入实录2026-08-14)。
