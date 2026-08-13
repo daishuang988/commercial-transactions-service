@@ -94,10 +94,9 @@ func Merchandises(c *gin.Context) {
 
 	var list []map[string]interface{}
 	var count int64
-	// 未售 = status=0 + 展示中 + 无未取消订单（与老系统对齐：老系统商品卖完 status 仍为0，已售判定看订单存在性）
-	repository.DB.Table("merchandises").Where("status = 0 AND is_show = 1 AND NOT "+repository.MerchSoldSub).Count(&count)
+	repository.DB.Table("merchandises").Where("status = 0 AND is_show = 1").Count(&count)
 	repository.DB.Table("merchandises").
-		Where("status = 0 AND is_show = 1 AND NOT " + repository.MerchSoldSub).
+		Where("status = 0 AND is_show = 1").
 		Order("id DESC").
 		Offset((page - 1) * limit).Limit(limit).
 		Find(&list)
@@ -122,7 +121,7 @@ func Agreements(c *gin.Context) {
 func MerchandiseDetail(c *gin.Context) {
 	id := parseIntParam(c, "id")
 	var m map[string]interface{}
-	repository.DB.Table("merchandises").Where("id = ? AND status = 0 AND is_show = 1 AND NOT "+repository.MerchSoldSub, id).Take(&m)
+	repository.DB.Table("merchandises").Where("id = ? AND status = 0 AND is_show = 1", id).Take(&m)
 	if m == nil {
 		app.NotFound(c, "商品不存在或已下架")
 		return
@@ -226,7 +225,7 @@ func BuyMerchandise(c *gin.Context) {
 
 	// 查寄售商品
 	var merc model.Merchandise
-	if err := repository.DB.Where("id = ? AND status = 0 AND is_show = 1 AND NOT "+repository.MerchSoldSub, mercID).First(&merc).Error; err != nil {
+	if err := repository.DB.Where("id = ? AND status = 0 AND is_show = 1", mercID).First(&merc).Error; err != nil {
 		app.NotFound(c, "商品不存在或已售出")
 		return
 	}

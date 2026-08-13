@@ -126,9 +126,7 @@ UPDATE users SET contract = '';
 
 订单关联的寄售商品如果不在已迁移商品中，从老系统全量商品数据补入（临时禁用 `fk_merch_user` 外键）。
 
-订单关联的树外卖家商品也需补入（订单详情 LEFT JOIN merchandises 显示商品信息，不筛 status/is_show），状态/is_show 怎么置**问用户**。树内寄卖池商品按老系统原状态导入，**不要改状态**——老系统 status=0 即使有完成订单也是正常寄卖中（2026-08-14 曾误按新系统语义批量改成已售，用户指出改反了，已还原）。
-
-已售/未售**判定**已在新系统代码层与老系统对齐（2026-08-14）：**存在未取消订单即视为已售**（`repository.MerchSoldSub`），C端寄卖池/详情/购买/抢购均排除已售商品，管理端列表状态按同规则换算返回。老系统 status 字段本身保持原样，只改判定口径不改数据。
+订单关联的树外卖家商品也需补入（订单详情 LEFT JOIN merchandises 显示商品信息，不筛 status/is_show），状态/is_show 怎么置**问用户**。树内寄卖池商品导入时**必须反转 status**——老系统 status 语义与新系统相反（老 0=已售、1=未售；新 0=待售、1=已售），映射 `status_new = 1 - status_old`。老系统"已售"判定**只看 status 字段、不看订单存在性**。2026-08-14 首轮按原值照搬导致全部反转（已售商品变待售进入寄卖池），当晚已用 `UPDATE merchandises m JOIN users u ON u.id=m.user_id SET m.status = 1 - m.status` 修复（备份 /opt/app/import_94694/merch_status_invert_backup_0814_0259.sql），并回退了误加的"订单存在性判定"代码。
 
 迁移后验证：
 ```sql

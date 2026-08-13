@@ -215,9 +215,9 @@ func FlashSaleBuy(c *gin.Context) {
 		return
 	}
 
-	// 6. 从寄售商品池取一单可用商品 → 生成订单（排除已售：有未取消订单的视为已售，与老系统对齐）
+	// 6. 从寄售商品池取一单可用商品 → 生成订单
 	var merc model.Merchandise
-	if err := repository.DB.Where("status = 0 AND is_show = 1 AND NOT " + repository.MerchSoldSub).Order("RAND()").First(&merc).Error; err != nil {
+	if err := repository.DB.Where("status = 0 AND is_show = 1").Order("RAND()").First(&merc).Error; err != nil {
 		app.InternalError(c, "暂无可抢商品")
 		return
 	}
