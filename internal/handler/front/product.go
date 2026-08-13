@@ -88,16 +88,21 @@ func Categories(c *gin.Context) {
 }
 
 // Merchandises 寄售商品列表 GET /api/v1/front/merchandises?page=1&limit=10
+// mine=1 时返回当前用户名下的全部寄售商品（含已售），用于卖方仓库展示
 func Merchandises(c *gin.Context) {
 	page := queryInt(c, "page", 1)
 	limit := queryInt(c, "limit", 10)
 
 	var list []map[string]interface{}
 	var count int64
-	repository.DB.Table("merchandises").Where("status = 0 AND is_show = 1").Count(&count)
-	repository.DB.Table("merchandises").
-		Where("status = 0 AND is_show = 1").
-		Order("id DESC").
+	q := repository.DB.Table("merchandises")
+	if c.Query("mine") == "1" {
+		q = q.Where("user_id = ?", c.GetInt64("user_id"))
+	} else {
+		q = q.Where("status = 0 AND is_show = 1")
+	}
+	q.Count(&count)
+	q.Order("id DESC").
 		Offset((page - 1) * limit).Limit(limit).
 		Find(&list)
 	if list == nil {
