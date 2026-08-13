@@ -126,7 +126,7 @@ UPDATE users SET contract = '';
 
 订单关联的寄售商品如果不在已迁移商品中，从老系统全量商品数据补入（临时禁用 `fk_merch_user` 外键）。
 
-订单关联的树外卖家商品也需补入（订单详情 LEFT JOIN merchandises 显示商品信息，不筛 status/is_show），并按新系统语义置 `status=1（已售）+ is_show=1`——寄卖池只筛 `status=0 AND is_show=1`，已售商品天然不进入售卖列表。
+订单关联的树外卖家商品也需补入（订单详情 LEFT JOIN merchandises 显示商品信息，不筛 status/is_show），状态/is_show 怎么置**问用户**。树内寄卖池商品按老系统原状态导入，**不要改状态**——老系统 status=0 即使有完成订单也是正常寄卖中（2026-08-14 曾误按新系统语义批量改成已售，用户指出改反了，已还原）。
 
 迁移后验证：
 ```sql
