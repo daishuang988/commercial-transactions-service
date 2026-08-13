@@ -36,3 +36,4 @@ tools/*.txt
 tools/*_stderr.txt
 tools/import_*.go
 docs/服务器/
+tools/old_system_migration/output_import/
