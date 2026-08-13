@@ -128,6 +128,10 @@ func ListUsers(req model.UserListReq) ([]UserWithWallet, int64, error) {
 
 // ─── 订单相关 ───
 
+// MerchSoldSub 寄售商品"已售"判定子查询（老系统规则：商品存在未取消订单即视为已售。
+// 老系统 merchandises.status 字段不可靠——卖完仍为0，故判定一律以订单存在性为准）
+const MerchSoldSub = "EXISTS (SELECT 1 FROM orders o WHERE o.merchandise_id = merchandises.id AND o.status <> 3)"
+
 func ListOrders(req model.OrderListReq) ([]model.Order, int64, error) {
 	var orders []model.Order
 	var count int64

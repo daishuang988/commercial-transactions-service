@@ -167,6 +167,10 @@ func UpdateGoodStock(c *gin.Context) {
 
 // ============ 寄售商品 ============
 
+// merchSelectCols 管理端商品列表返回列：status 按老系统规则换算（有未取消订单即已售），前端无需改动
+const merchSelectCols = "id, old_id, user_id, title, image, price, is_show, " +
+	"IF(status = 1 OR "+repository.MerchSoldSub+", 1, 0) AS status, created_at, updated_at"
+
 // ListMerchandises 寄售商品列表 GET /api/v1/admin/merchandises
 // SearchMerchandises 寄售商品筛选 POST /api/v1/admin/merchandises/search
 func SearchMerchandises(c *gin.Context) {
@@ -209,8 +213,12 @@ func SearchMerchandises(c *gin.Context) {
 		args = append(args, *req.IsShow)
 	}
 	if req.Status != nil {
-		where += " AND status = ?"
-		args = append(args, *req.Status)
+		// 已售/待售按老系统规则判定：有未取消订单即已售（老系统 status 字段卖完仍为0）
+		if *req.Status == 0 {
+			where += " AND status = 0 AND NOT " + repository.MerchSoldSub
+		} else {
+			where += " AND (status = 1 OR " + repository.MerchSoldSub + ")"
+		}
 	}
 	if req.CreateStart != "" {
 		where += " AND created_at >= ?"
@@ -233,7 +241,7 @@ func SearchMerchandises(c *gin.Context) {
 	var list []model.Merchandise
 	var count int64
 	countSQL := "SELECT count(*) FROM merchandises" + where
-	listSQL := "SELECT * FROM merchandises" + where + " ORDER BY id DESC LIMIT ? OFFSET ?"
+	listSQL := "SELECT " + merchSelectCols + " FROM merchandises" + where + " ORDER BY id DESC LIMIT ? OFFSET ?"
 	repository.DB.Raw(countSQL, args[:len(args)-2]...).Scan(&count)
 	repository.DB.Raw(listSQL, args...).Scan(&list)
 	if list == nil { list = []model.Merchandise{} }
@@ -246,7 +254,7 @@ func ListMerchandises(c *gin.Context) {
 	var list []model.Merchandise
 	var count int64
 	repository.DB.Model(&model.Merchandise{}).Count(&count)
-	repository.DB.Order("id DESC").Offset((page-1)*limit).Limit(limit).Find(&list)
+	repository.DB.Raw("SELECT "+merchSelectCols+" FROM merchandises ORDER BY id DESC LIMIT ? OFFSET ?", limit, (page-1)*limit).Scan(&list)
 	if list == nil { list = []model.Merchandise{} }
 	app.OKWithCount(c, list, count)
 }
