@@ -145,6 +145,12 @@ func ListOrders(req model.OrderListReq) ([]model.Order, int64, error) {
 		kw := "%" + req.Keyword + "%"
 		db = db.Where("order_sn LIKE ? OR consignee LIKE ? OR phone LIKE ?", kw, kw, kw)
 	}
+	if req.StartTime != "" {
+		db = db.Where("created_at >= ?", req.StartTime)
+	}
+	if req.EndTime != "" {
+		db = db.Where("created_at <= ?", req.EndTime)
+	}
 	db.Count(&count)
 	err := db.Order("id DESC").Offset((req.Page-1)*req.Limit).Limit(req.Limit).Find(&orders).Error
 	return orders, count, err
@@ -184,13 +190,15 @@ type GoodWithCategory struct {
 	CategoryName string `json:"category_name"`
 }
 
-func ListGoods(page, limit int, categoryID *int64, keyword string) ([]GoodWithCategory, int64, error) {
+func ListGoods(page, limit int, status *int8, categoryID *int64, keyword string) ([]GoodWithCategory, int64, error) {
 	var goods []GoodWithCategory
 	var count int64
 
 	base := DB.Table("goods g").Select("g.*, c.title as category_name").
-		Joins("LEFT JOIN categories c ON g.category_id = c.id").
-		Where("g.status = 1")
+		Joins("LEFT JOIN categories c ON g.category_id = c.id")
+	if status != nil {
+		base = base.Where("g.status = ?", *status)
+	}
 
 	if categoryID != nil && *categoryID > 0 {
 		base = base.Where("g.category_id = ?", *categoryID)

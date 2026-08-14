@@ -20,7 +20,8 @@ func Products(c *gin.Context) {
 	page := queryInt(c, "page", 1)
 	limit := queryInt(c, "limit", 10)
 
-	goods, count, err := repository.ListGoods(page, limit, nil, c.Query("keyword"))
+	st := int8(1) // C端商品列表只出上架商品
+	goods, count, err := repository.ListGoods(page, limit, &st, nil, c.Query("keyword"))
 	if err != nil {
 		app.InternalError(c, "获取失败")
 		return

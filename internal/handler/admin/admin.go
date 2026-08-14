@@ -659,8 +659,16 @@ func ListGoods(c *gin.Context) {
 			categoryID = &id
 		}
 	}
+	// status 可选：0=下架 1=上架；不传返回全部（管理端需要看到下架商品）
+	var status *int8
+	if v := c.Query("status"); v != "" {
+		var s int8
+		if _, err := fmt.Sscanf(v, "%d", &s); err == nil && (s == 0 || s == 1) {
+			status = &s
+		}
+	}
 	keyword := c.Query("keyword")
-	goods, count, err := repository.ListGoods(page, limit, categoryID, keyword)
+	goods, count, err := repository.ListGoods(page, limit, status, categoryID, keyword)
 	if err != nil {
 		app.InternalError(c, "查询失败")
 		return
