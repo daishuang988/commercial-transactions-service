@@ -316,7 +316,7 @@ func RegisterV2(c *gin.Context) {
 		Sex:       0,
 		Avatar:    "/assets/img/avatar.png",
 		Invite:    myInvite,
-		Level:     0,
+		Level:     1, // 新用户默认推荐人
 		Status:    1,
 		PID:       parent.ID,
 		IsResell:  1,
