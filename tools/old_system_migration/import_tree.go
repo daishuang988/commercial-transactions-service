@@ -157,6 +157,15 @@ func sqlInt(v interface{}) string {
 	return strconv.FormatInt(asInt(v), 10)
 }
 
+// sqlLevel 老系统 level 1/2/3（普通/推荐人/店长）→ 新系统 0/1/2
+func sqlLevel(v interface{}) string {
+	n := asInt(v)
+	if n > 0 {
+		n--
+	}
+	return strconv.FormatInt(n, 10)
+}
+
 // 可空字符串：空 → NULL
 func sqlStrNull(v interface{}) string {
 	if asStr(v) == "" {
@@ -241,7 +250,7 @@ func (l *loader) importUsers(rows []map[string]interface{}, wallet *batchWriter,
 			sqlInt(r["sex"]),
 			sqlStr(r["avatar"]),
 			sqlStr(r["invite"]),
-			sqlInt(r["level"]),
+			sqlLevel(r["level"]),
 			sqlTime(r["birthday"]),
 			sqlInt(r["is_vip"]),
 			sqlTime(r["viptime"]),
