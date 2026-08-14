@@ -313,6 +313,12 @@ func (l *loader) importMerch(rows []map[string]interface{}, linkedIDs map[int64]
 		} else {
 			oldIDStr = sqlInt(oldID)
 		}
+		// status: 老系统 0=已售/1=未售，新系统 0=待售/1=已售，语义相反必须反转；
+		// 树外关联商品（订单引用）按已售 status=1 导入
+		statusNew := int64(1)
+		if l.tree[uid] {
+			statusNew = 1 - asInt(r["status"])
+		}
 		w.add(
 			strconv.FormatInt(id, 10),
 			oldIDStr,
@@ -321,7 +327,7 @@ func (l *loader) importMerch(rows []map[string]interface{}, linkedIDs map[int64]
 			sqlStr(r["image"]),
 			l.asMoney(r["price"]),
 			sqlInt(r["is_show"]),
-			sqlInt(r["status"]),
+			strconv.FormatInt(statusNew, 10),
 			sqlTimeRequired(r["created_at"]),
 			sqlTimeRequired(r["updated_at"]),
 		)
