@@ -577,12 +577,15 @@ func SearchOrders(c *gin.Context) {
 	args = append(args, req.Limit, (req.Page-1)*req.Limit)
 	var list []map[string]interface{}
 	var count int64
+	var totalMoney float64
 	countSQL := "SELECT count(*) FROM orders o" + where
+	sumSQL := "SELECT COALESCE(SUM(o.total_money),0) FROM orders o" + where
 	listSQL := "SELECT o.*, bu.nickname as buyer_name, su.nickname as seller_name FROM orders o LEFT JOIN users bu ON o.buyer_id=bu.id LEFT JOIN users su ON o.seller_id=su.id" + where + " ORDER BY o.id DESC LIMIT ? OFFSET ?"
 	repository.DB.Raw(countSQL, args[:len(args)-2]...).Scan(&count)
+	repository.DB.Raw(sumSQL, args[:len(args)-2]...).Scan(&totalMoney)
 	repository.DB.Raw(listSQL, args...).Scan(&list)
 	if list == nil { list = []map[string]interface{}{} }
-	app.OKWithCount(c, list, count)
+	app.OKWithCountAndSum(c, list, count, totalMoney)
 }
 
 // ListOrders 订单列表 GET /api/v1/admin/orders
