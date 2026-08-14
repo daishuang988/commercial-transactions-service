@@ -125,6 +125,12 @@ func parseProductConfig(s string) (int, int, string) {
 func FlashSaleBuy(c *gin.Context) {
 	uid := c.GetInt64("user_id")
 
+	// 商城寄售总开关：关闭时禁止抢购
+	if repository.GetConfigInt("resell_open", 1) == 0 {
+		app.Fail(c, app.ErrCodeFlashSaleClosed, "抢购活动已经结束")
+		return
+	}
+
 	var req model.FlashSaleBuyReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		app.BadRequest(c, "请选择商品")

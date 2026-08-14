@@ -222,6 +222,12 @@ func BuyMerchandise(c *gin.Context) {
 	uid := c.GetInt64("user_id")
 	mercID := parseIntParam(c, "id")
 
+	// 商城寄售总开关：关闭时禁止购买
+	if repository.GetConfigInt("resell_open", 1) == 0 {
+		app.Fail(c, app.ErrCodeFlashSaleClosed, "抢购活动已经结束")
+		return
+	}
+
 	var req BuyMerchandiseReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		app.BadRequest(c, "请填写收货人姓名和手机号")
