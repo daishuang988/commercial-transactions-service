@@ -353,11 +353,10 @@ func (l *loader) importOrders(rows []map[string]interface{}, merchAll map[int64]
 	for _, r := range rows {
 		buyer := asInt(r["buyer_id"])
 		seller := asInt(r["seller_id"])
-		if !l.tree[buyer] && !l.tree[seller] {
-			continue
-		}
+		// 订单范围（用户拍板）：买家在树内即导；买家不在树内的单不导（8-14 曾全量导入后再删 16,071 条）
 		if !l.tree[buyer] {
 			buyerOut++
+			continue
 		}
 		if !l.tree[seller] {
 			sellerOut++
