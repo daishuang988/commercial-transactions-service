@@ -275,11 +275,13 @@ mysql -h127.0.0.1 -uroot -p flash_sale < output_import/01_users.sql  # ... 依�
 3. 删除上一轮导入的树内数据（users 树内 655 人及其 wallets/merchandises/orders/withdraws/withdraw_accounts/三类流水/合同），关外键执行，范围与用户确认后删
 4. 清 Redis 测试计数：`DEL flash:user:daily:100465:* flash:user:daily:99990:*` 及当天其他测试 key
 
-### 第 1 步：爬取（凌晨 00:05 后）
+### 第 1 步：爬取（凌晨结算后）
+
+⚠️ 结算时间修正（8-15 实测）：老系统结算流水是 **23:46 开始、写到次日凌晨 01:43** 才写完（"00:05 落库"的说法不准）。爬前先查 `selfbonus-log` 最新"今日收益"条目时间，确认写完再爬，否则当天收益缺失。8-15 用户拍板在结算前就爬（接受 8-14 收益缺失）。
 
 ```bash
 cd tools/old_system_migration
-./output/crawl.exe -fullsync -api-list apis.txt -cookie "PHPSID=xxx" -output ./output_new2
+./output/crawl.exe -fullsync -api-list apis.txt -cookie "PHPSID=xxx" -output ./output_new3
 ```
 
 爬虫只管爬不动库，爬完**重算粉丝树核对人数**（上次漏了 23:19 新注册的 100507 付洪亮）：
@@ -298,7 +300,7 @@ go build -o import_tree.exe import_tree.go
 ./import_tree.exe fan_tree_ids.txt output_new2/data output_import
 ```
 
-Go 脚本只做 JSON→SQL 转换**不连库**。生成 01_users 02_user_wallets 03_merchandises 04_orders 05_withdraw_accounts 06_withdraws 07_self_bonus_logs 08_share_bonus_logs 09_coupon_logs。SQL 生成阶段直接内置：密码 `MD5(CONCAT('123456', salt))`、清合同、**status 反转（status_new = 1 - status_old）**、已完成订单 coupon_settled=1、提现 0/1/2→2/1/3、cate 2/4→coupon/share_bonus、level 1/2/3→0/1/2、图片路径 /uploads/→/upload/image/、树外卖家商品 15,047 件 status=1 一并导入（订单 JOIN 展示需要）。
+Go 脚本只做 JSON→SQL 转换**不连库**。生成 01_users 02_user_wallets 03_merchandises 04_orders 05_withdraw_accounts 06_withdraws 07_self_bonus_logs 08_share_bonus_logs 09_coupon_logs。SQL 生成阶段直接内置：密码 `MD5(CONCAT('123456', salt))`、清合同、**status 反转（status_new = 1 - status_old）**、已完成订单 coupon_settled=1、提现 0/1/2→2/1/3、cate 2/4→coupon/share_bonus、level 1/2/3→0/1/2、**订单范围＝买家在树内才导**（8-15 起内置，8-14 曾全量导入后再删 16,071 条）、树外卖家商品 status=1 一并导入（订单 JOIN 展示需要）。图片路径 /uploads/→/upload/image/ 未内置，导入后 `UPDATE merchandises SET image=REPLACE(image,'/uploads/','/upload/image/') WHERE image LIKE '/uploads/%'`（8-15 实际 10 条）。
 
 ### 第 3 步：导入（按编号顺序）
 
@@ -334,6 +336,14 @@ mysql -h127.0.0.1 -uroot -p flash_sale < output_import/01_users.sql  # ... 依�
 8. **测试数据不清** = 残留脏订单/商品，重导前必须清+备份
 9. **account_info 用字符串匹配解析** = 失败，必须 encoding/json
 10. **Go 脚本连库** = 禁止，只 JSON→SQL，写入由 MySQL CLI 执行
+
+### 2026-08-15 凌晨执行实录（全部通过）
+
+- 00:20 爬取（19 分钟，output_new3，21 接口全）→ 重算粉丝树 **655→668**（+13 人全是 8-14 新注册，0 减少）
+- 00:49 全库备份 backup_full_0815_重导前.sql → 清 12 表（含新系统测试注册用户 100508）→ SQL 生成后抽样核对：level 0 错、status 反转 0 错、提现 0 错、密码/合同/ coupon_settled 全对
+- 00:53 执行 01-09 全 OK。结果：用户 668、钱包 668、订单 21,624（买家在树内）、商品 37,012（**池 540** + 已售 36,472）、提现 201、账户 99、流水 12,220/21,624/20,648
+- 导入后：图片路径修正 10 条；商品标准化 546 件（池 540 + is_resell=0 关联 6）
+- 验证全过：会重复结算订单 0、池内树外卖家 0、悬空商品 1,660（=老系统原状）、登录 123456 通过（13716057283/13699190269）、袁小华钱包与老系统 API 数值一致
 
 ---
 
