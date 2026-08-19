@@ -254,6 +254,7 @@ func FlashSaleBuy(c *gin.Context) {
 		UpdatedAt:     now,
 	}
 	if err := repository.DB.Create(&order).Error; err != nil {
+		repository.RDB.Decr(c.Request.Context(), todayKey) // 创建失败回滚当日计数
 		app.InternalError(c, "订单创建失败")
 		return
 	}
