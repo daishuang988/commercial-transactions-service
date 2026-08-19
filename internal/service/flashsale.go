@@ -172,12 +172,12 @@ func SettleDailyCoupons() {
 		repository.DB.Model(&o).Update("coupon_settled", int8(1))
 	}
 
-	// 快照：今日卖数据 → yesterday_sell_count，然后归零今日计数
+	// 快照：今日卖数据 → yesterday_sell_count（下单即算卖，取消订单除外），然后归零今日计数
 	repository.DB.Exec(`
 		UPDATE users u
 		SET yesterday_sell_count = (
 			SELECT COUNT(*) FROM orders o
-			WHERE o.seller_id = u.id AND o.status = 2 AND DATE(o.confirm_time) = CURDATE()
+			WHERE o.seller_id = u.id AND o.status IN (0,1,2) AND DATE(o.created_at) = CURDATE()
 		),
 		today_buy_total = 0,
 		today_buy_count = 0,

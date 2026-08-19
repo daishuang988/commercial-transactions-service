@@ -667,8 +667,8 @@ func ExportUsers(c *gin.Context) {
 	var rows []ExportRow
 	repository.DB.Raw(`
 		SELECT u.id AS user_id, u.nickname,
-			COALESCE((SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.seller_id=u.id AND o.status=2 AND DATE(o.confirm_time)=CURDATE()), 0) AS today_sell_total,
-			COALESCE((SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.buyer_id=u.id AND o.status=2 AND DATE(o.confirm_time)=CURDATE()), 0) AS today_buy_total,
+			COALESCE((SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.seller_id=u.id AND o.status IN (0,1,2) AND DATE(o.created_at)=CURDATE()), 0) AS today_sell_total,
+			COALESCE((SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.buyer_id=u.id AND o.status IN (0,1,2) AND DATE(o.created_at)=CURDATE()), 0) AS today_buy_total,
 			COALESCE(u.pid,0) AS parent_id,
 			COALESCE((SELECT p.nickname FROM users p WHERE p.id=u.pid), '') AS parent_nickname
 		FROM users u

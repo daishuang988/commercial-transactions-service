@@ -137,14 +137,7 @@ func FlashSaleBuy(c *gin.Context) {
 		return
 	}
 
-	// 1. 查找活动
-	event, err := repository.GetFlashSaleEventByProductID(req.ProductID)
-	if err != nil || event == nil {
-		app.NotFound(c, "秒杀活动不存在")
-		return
-	}
-
-	// 2. 获取用户信息（优先等级 + 个人限购数）
+	// 1. 获取用户信息（优先等级 + 个人限购数）
 	user, err := repository.GetUserByID(uid)
 	if err != nil || user == nil {
 		app.NotFound(c, "用户不存在")
@@ -158,18 +151,25 @@ func FlashSaleBuy(c *gin.Context) {
 		return
 	}
 
-	// 3. 优先用户时间窗口提前
+	// 2. 全局窗口校验（优先用户仅可在配置的提前窗口内抢购，其余时间一律按配置窗口）
+	if !repository.IsFlashSaleTime() && !(isPriority && isInPriorityWindow()) {
+		app.Fail(c, app.ErrCodeFlashSaleNotInTime, "不在抢购时间段内")
+		return
+	}
+
+	// 3. 查找活动
+	event, err := repository.GetFlashSaleEventByProductID(req.ProductID)
+	if err != nil || event == nil {
+		app.NotFound(c, "秒杀活动不存在")
+		return
+	}
+
+	// 4. 优先用户时间窗口提前 + 活动时间双重校验
 	now := time.Now().In(repository.CSTLocation())
 	effectiveStart := event.StartTime
 	if isPriority {
 		advanceMin := repository.GetConfigInt("priority_advance_minutes", 0)
 		effectiveStart = event.StartTime.Add(-time.Duration(advanceMin) * time.Minute)
-	}
-
-	// 全局窗口 + 活动时间双重校验
-	if !repository.IsFlashSaleTime() && !isPriority {
-		app.Fail(c, app.ErrCodeFlashSaleNotInTime, "不在抢购时间段内")
-		return
 	}
 	if now.Before(effectiveStart) {
 		app.Fail(c, app.ErrCodeFlashSaleNotInTime, "抢购尚未开始")

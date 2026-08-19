@@ -66,10 +66,10 @@ func ListUsers(req model.UserListReq) ([]UserWithWallet, int64, error) {
 	var count int64
 
 	// 资金字段从 user_wallets 直读
-	// 今日买卖实时算，昨日卖用存储快照（每天23:59结算时固化）
-	subTodayBuy := "(SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.buyer_id = u.id AND o.status = 2 AND DATE(o.confirm_time) = CURDATE())"
-	subTodayBuyCnt := "(SELECT COUNT(*) FROM orders o WHERE o.buyer_id = u.id AND o.status = 2 AND DATE(o.confirm_time) = CURDATE())"
-	subTodaySell := "(SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.seller_id = u.id AND o.status = 2 AND DATE(o.confirm_time) = CURDATE())"
+	// 今日买卖实时算（下单即算，取消订单除外），昨日卖用存储快照（每天23:59结算时固化）
+	subTodayBuy := "(SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.buyer_id = u.id AND o.status IN (0,1,2) AND DATE(o.created_at) = CURDATE())"
+	subTodayBuyCnt := "(SELECT COUNT(*) FROM orders o WHERE o.buyer_id = u.id AND o.status IN (0,1,2) AND DATE(o.created_at) = CURDATE())"
+	subTodaySell := "(SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.seller_id = u.id AND o.status IN (0,1,2) AND DATE(o.created_at) = CURDATE())"
 
 	selectSQL := fmt.Sprintf(`u.*,
 		COALESCE(w.money,0) money,

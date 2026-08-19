@@ -235,6 +235,25 @@ func BuyMerchandise(c *gin.Context) {
 		return
 	}
 
+	// 用户校验（优先于商品校验，窗口外直接拒绝）
+	user, err := repository.GetUserByID(uid)
+	if err != nil || user == nil {
+		app.NotFound(c, "用户不存在")
+		return
+	}
+	userMaxOrder := user.MaxOrder
+	if userMaxOrder <= 0 {
+		app.Fail(c, app.ErrCodeLimitExceeded, "未配置抢购上限，无法抢购")
+		return
+	}
+
+	// 抢购时间窗校验：非配置时间段内不允许下单（与抢购通道一致，优先用户仅可在配置的提前窗口内下单）
+	isPriority := user.IsPriority == 1
+	if !repository.IsFlashSaleTime() && !(isPriority && isInPriorityWindow()) {
+		app.Fail(c, app.ErrCodeFlashSaleNotInTime, "不在抢购时间段内")
+		return
+	}
+
 	// 查寄售商品
 	var merc model.Merchandise
 	if err := repository.DB.Where("id = ? AND status = 0 AND is_show = 1", mercID).First(&merc).Error; err != nil {
@@ -248,19 +267,8 @@ func BuyMerchandise(c *gin.Context) {
 		return
 	}
 
-	// 每日限购校验（与 FlashSaleBuy 一致）
-	user, err := repository.GetUserByID(uid)
-	if err != nil || user == nil {
-		app.NotFound(c, "用户不存在")
-		return
-	}
-	userMaxOrder := user.MaxOrder
-	if userMaxOrder <= 0 {
-		app.Fail(c, app.ErrCodeLimitExceeded, "未配置抢购上限，无法抢购")
-		return
-	}
 	effectiveCap := userMaxOrder
-	if user.IsPriority == 1 && isInPriorityWindow() {
+	if isPriority && isInPriorityWindow() {
 		priorityCap := repository.GetConfigInt("priority_max_orders", 0)
 		if priorityCap > 0 && priorityCap < effectiveCap {
 			effectiveCap = priorityCap
