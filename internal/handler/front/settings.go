@@ -2,6 +2,7 @@ package front
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -165,7 +166,7 @@ func SignContract(c *gin.Context) {
 	html := fmt.Sprintf(`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
 @page{size:615pt 870pt;margin:0} body{margin:0;padding:0}
 .wrap{position:absolute;left:40px;top:40px;text-align:left}
-.wrap p{margin:8px 0;font-size:16px;font-family:"Microsoft YaHei",sans-serif}
+.wrap p{margin:14px 0;font-size:22px;font-family:"WenQuanYi Micro Hei","Microsoft YaHei",sans-serif}
 .wrap img{max-width:200px;max-height:80px;vertical-align:middle}
 </style></head><body>
 <div class="wrap">
@@ -176,12 +177,26 @@ func SignContract(c *gin.Context) {
 	os.WriteFile(signHTML, []byte(html), 0644)
 
 	// headless 签名页 → PDF
-	if browser := findBrowser(); browser != "" {
-		absSign, _ := filepath.Abs(signPDF)
+	absSign, _ := filepath.Abs(signPDF)
+	absHTML, _ := filepath.Abs(signHTML)
+
+	// 优先 wkhtmltopdf（轻量，无 snap AppArmor 限制）
+	wk := findTool("wkhtmltopdf", "/usr/bin/wkhtmltopdf", "/usr/local/bin/wkhtmltopdf")
+	if wk != "" {
+		if err := exec.Command(wk, "--page-width", "615pt", "--page-height", "870pt",
+			"--margin-top", "0", "--margin-bottom", "0",
+			"--margin-left", "0", "--margin-right", "0", absHTML, absSign).Run(); err != nil {
+			log.Printf("[SignContract] wkhtmltopdf 失败: %v", err)
+		}
+	} else if browser := findBrowser(); browser != "" {
 		signURL := fmt.Sprintf("http://localhost:8080/upload/sign_contract/%s_sign.html", filename)
-		exec.Command(browser, "--headless", "--disable-gpu", "--no-sandbox",
+		if err := exec.Command(browser, "--headless", "--disable-gpu", "--no-sandbox",
 			"--no-pdf-header-footer",
-			fmt.Sprintf("--print-to-pdf=%s", absSign), signURL).Run()
+			fmt.Sprintf("--print-to-pdf=%s", absSign), signURL).Run(); err != nil {
+			log.Printf("[SignContract] browser PDF 失败: %v", err)
+		}
+	} else {
+		log.Printf("[SignContract] 未找到 HTML→PDF 工具，签名页无法生成")
 	}
 
 	// pdfcpu 合并：原合同 + 签名页
@@ -204,8 +219,27 @@ func SignContract(c *gin.Context) {
 	})
 }
 
+// findTool 按顺序查找可执行文件，返回第一个存在的路径
+func findTool(names ...string) string {
+	for _, n := range names {
+		if _, err := os.Stat(n); err == nil { return n }
+	}
+	return ""
+}
+
 func findBrowser() string {
 	for _, p := range []string{
+		// Linux
+		`/usr/bin/chromium-browser`,
+		`/usr/bin/chromium`,
+		`/usr/bin/google-chrome`,
+		`/usr/bin/google-chrome-stable`,
+		// macOS
+		`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`,
+		`/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge`,
+		// Windows
+		`C:\Program Files\Google\Chrome\Application\chrome.exe`,
+		`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
 		`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
 		`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
 	} { if _, err := os.Stat(p); err == nil { return p } }

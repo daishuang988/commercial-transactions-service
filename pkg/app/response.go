@@ -8,10 +8,11 @@ import (
 
 // Response 统一响应结构（对标老系统 {"code":0,"msg":"ok","data":...}）
 type Response struct {
-	Code  int         `json:"code"`
-	Msg   string      `json:"msg"`
-	Data  interface{} `json:"data,omitempty"`
-	Count int64       `json:"count,omitempty"` // 分页总数
+	Code       int         `json:"code"`
+	Msg        string      `json:"msg"`
+	Data       interface{} `json:"data,omitempty"`
+	Count      int64       `json:"count,omitempty"`       // 分页总数
+	TotalMoney float64     `json:"total_money,omitempty"` // 全量总金额（非本页）
 }
 
 func OK(c *gin.Context, data interface{}) {
@@ -20,6 +21,10 @@ func OK(c *gin.Context, data interface{}) {
 
 func OKWithCount(c *gin.Context, data interface{}, count int64) {
 	c.JSON(http.StatusOK, Response{Code: 0, Msg: "ok", Data: data, Count: count})
+}
+
+func OKWithCountAndSum(c *gin.Context, data interface{}, count int64, totalMoney float64) {
+	c.JSON(http.StatusOK, Response{Code: 0, Msg: "ok", Data: data, Count: count, TotalMoney: totalMoney})
 }
 
 func Fail(c *gin.Context, code int, msg string) {

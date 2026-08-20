@@ -20,7 +20,8 @@ func Products(c *gin.Context) {
 	page := queryInt(c, "page", 1)
 	limit := queryInt(c, "limit", 10)
 
-	goods, count, err := repository.ListGoods(page, limit, nil, c.Query("keyword"))
+	st := int8(1) // C端商品列表只出上架商品
+	goods, count, err := repository.ListGoods(page, limit, &st, nil, c.Query("keyword"))
 	if err != nil {
 		app.InternalError(c, "获取失败")
 		return
@@ -88,16 +89,21 @@ func Categories(c *gin.Context) {
 }
 
 // Merchandises 寄售商品列表 GET /api/v1/front/merchandises?page=1&limit=10
+// mine=1 时返回当前用户名下的全部寄售商品（含已售），用于卖方仓库展示
 func Merchandises(c *gin.Context) {
 	page := queryInt(c, "page", 1)
 	limit := queryInt(c, "limit", 10)
 
 	var list []map[string]interface{}
 	var count int64
-	repository.DB.Table("merchandises").Where("status = 0 AND is_show = 1").Count(&count)
-	repository.DB.Table("merchandises").
-		Where("status = 0 AND is_show = 1").
-		Order("id DESC").
+	q := repository.DB.Table("merchandises")
+	if c.Query("mine") == "1" {
+		q = q.Where("user_id = ?", c.GetInt64("user_id"))
+	} else {
+		q = q.Where("status = 0 AND is_show = 1")
+	}
+	q.Count(&count)
+	q.Order("id DESC").
 		Offset((page - 1) * limit).Limit(limit).
 		Find(&list)
 	if list == nil {
@@ -217,9 +223,34 @@ func BuyMerchandise(c *gin.Context) {
 	uid := c.GetInt64("user_id")
 	mercID := parseIntParam(c, "id")
 
+	// 商城寄售总开关：关闭时禁止购买
+	if repository.GetConfigInt("resell_open", 1) == 0 {
+		app.Fail(c, app.ErrCodeFlashSaleClosed, "抢购活动已经结束")
+		return
+	}
+
 	var req BuyMerchandiseReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		app.BadRequest(c, "请填写收货人姓名和手机号")
+		return
+	}
+
+	// 用户校验（优先于商品校验，窗口外直接拒绝）
+	user, err := repository.GetUserByID(uid)
+	if err != nil || user == nil {
+		app.NotFound(c, "用户不存在")
+		return
+	}
+	userMaxOrder := user.MaxOrder
+	if userMaxOrder <= 0 {
+		app.Fail(c, app.ErrCodeLimitExceeded, "未配置抢购上限，无法抢购")
+		return
+	}
+
+	// 抢购时间窗校验：非配置时间段内不允许下单（与抢购通道一致，优先用户仅可在配置的提前窗口内下单）
+	isPriority := user.IsPriority == 1
+	if !repository.IsFlashSaleTime() && !(isPriority && isInPriorityWindow()) {
+		app.Fail(c, app.ErrCodeFlashSaleNotInTime, "不在抢购时间段内")
 		return
 	}
 
@@ -236,19 +267,8 @@ func BuyMerchandise(c *gin.Context) {
 		return
 	}
 
-	// 每日限购校验（与 FlashSaleBuy 一致）
-	user, err := repository.GetUserByID(uid)
-	if err != nil || user == nil {
-		app.NotFound(c, "用户不存在")
-		return
-	}
-	userMaxOrder := user.MaxOrder
-	if userMaxOrder <= 0 {
-		app.Fail(c, app.ErrCodeLimitExceeded, "未配置抢购上限，无法抢购")
-		return
-	}
 	effectiveCap := userMaxOrder
-	if user.IsPriority == 1 && isInPriorityWindow() {
+	if isPriority && isInPriorityWindow() {
 		priorityCap := repository.GetConfigInt("priority_max_orders", 0)
 		if priorityCap > 0 && priorityCap < effectiveCap {
 			effectiveCap = priorityCap
@@ -290,6 +310,7 @@ func BuyMerchandise(c *gin.Context) {
 		UpdatedAt:     now,
 	}
 	if err := repository.DB.Create(&order).Error; err != nil {
+		repository.RDB.Decr(c.Request.Context(), todayKey) // 创建失败回滚当日计数
 		app.InternalError(c, "订单创建失败")
 		return
 	}

@@ -171,6 +171,20 @@ func SettleDailyCoupons() {
 		repository.DB.Exec("UPDATE user_wallets SET coupon = ?, updated_at = NOW() WHERE user_id = ?", after, o.BuyerID)
 		repository.DB.Model(&o).Update("coupon_settled", int8(1))
 	}
+
+	// 快照：今日卖数据 → yesterday_sell_count（下单即算卖，取消订单除外），然后归零今日计数
+	repository.DB.Exec(`
+		UPDATE users u
+		SET yesterday_sell_count = (
+			SELECT COUNT(*) FROM orders o
+			WHERE o.seller_id = u.id AND o.status IN (0,1,2) AND DATE(o.created_at) = CURDATE()
+		),
+		today_buy_total = 0,
+		today_buy_count = 0,
+		today_sell_total = 0,
+		updated_at = NOW()
+	`)
+	log.Printf("用户昨日卖快照 + 今日计数归零完成")
 }
 
 func getWalletBal(userID int64, field string) float64 {

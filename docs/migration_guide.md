@@ -126,11 +126,14 @@ UPDATE users SET contract = '';
 
 订单关联的寄售商品如果不在已迁移商品中，从老系统全量商品数据补入（临时禁用 `fk_merch_user` 外键）。
 
+订单关联的树外卖家商品也需补入（订单详情 LEFT JOIN merchandises 显示商品信息，不筛 status/is_show），状态/is_show 怎么置**问用户**。树内寄卖池商品导入时**必须反转 status**——老系统 status 语义与新系统相反（老 0=已售、1=未售；新 0=待售、1=已售），映射 `status_new = 1 - status_old`。老系统"已售"判定**只看 status 字段、不看订单存在性**。2026-08-14 首轮按原值照搬导致全部反转（已售商品变待售进入寄卖池），当晚已用 `UPDATE merchandises m JOIN users u ON u.id=m.user_id SET m.status = 1 - m.status` 修复（备份 /opt/app/import_94694/merch_status_invert_backup_0814_0259.sql），并回退了误加的"订单存在性判定"代码。
+
 迁移后验证：
 ```sql
 -- 订单商品覆盖率
 SELECT COUNT(*) FROM orders WHERE merchandise_id NOT IN (SELECT id FROM merchandises);
--- 应为 0
+-- 理想为 0；>0 时先查这些 merchandise_id 是否老系统本就已删除（悬空引用）
+-- 老系统删过商品属常态，订单保留原 id 悬空即可，管理端商品信息为空属正常，不用补
 ```
 
 ---
@@ -241,3 +244,5 @@ UPDATE merchandises SET image = REPLACE(image, '/uploads/', '/upload/image/');
    ├─ 提现状态/货币类型正确
    └─ 新建商品→购买→付款→确认→寄卖 走通
 ```
+
+> 实际执行记录（2026-08-14，94694 袁小华全粉丝树 655 人）：工具链、导入量、踩坑与决策反复见 [crawl_rules.md 第六节](crawl_rules.md#六94694-全粉丝树导入实录2026-08-14)。

@@ -72,6 +72,7 @@ func main() {
 	// ============ C端 ============
 	fg := r.Group("/api/v1/front")
 	{
+		fg.GET("/captcha", front.Captcha)
 		fg.POST("/auth/login", middleware.RateLimiter(100), front.Login)
 		fg.POST("/auth/register-v2", front.RegisterV2)
 		fg.POST("/auth/reset-password", front.ResetPassword)

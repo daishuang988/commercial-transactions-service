@@ -34,6 +34,7 @@ var configMetaMap = map[string]ConfigMeta{
 	"flash_sale_end":          {Label: "抢购结束时间", Group: "秒杀规则", Type: "text"},
 	"priority_max_orders":     {Label: "优先抢购最多N单", Group: "秒杀规则", Type: "number"},
 	"priority_advance_minutes": {Label: "优先抢购提前N分钟", Group: "秒杀规则", Type: "number"},
+	"resell_open":             {Label: "商城寄售开关", Group: "交易规则", Type: "switch"},
 	"resell_rate":             {Label: "寄卖金额增值比例", Group: "交易规则", Type: "text"},
 	"store_manager_rate":      {Label: "店长收益比率", Group: "交易规则", Type: "text"},
 	"direct_referral_rate":    {Label: "直推收益比率(推广奖金)", Group: "交易规则", Type: "text"},
@@ -356,7 +357,7 @@ func UpdateAdmin(c *gin.Context) {
 			var existing int64
 			repository.DB.Model(&model.AdminUser{}).Where("username = ? AND id != ?", unStr, id).Count(&existing)
 			if existing > 0 {
-				app.Fail(c, app.ErrCodeUserExists, "该手机号已被其他管理员使用")
+				app.Fail(c, app.ErrCodeUserExists, "该用户名已被其他管理员使用")
 				return
 			}
 		}
@@ -384,11 +385,11 @@ func CreateAdmin(c *gin.Context) {
 		app.BadRequest(c, "参数错误")
 		return
 	}
-	// 检查手机号是否已注册
+	// 检查用户名是否已注册
 	var existing int64
 	repository.DB.Model(&model.AdminUser{}).Where("username = ?", req.Username).Count(&existing)
 	if existing > 0 {
-		app.Fail(c, app.ErrCodeUserExists, "该手机号已注册")
+		app.Fail(c, app.ErrCodeUserExists, "该用户名已注册")
 		return
 	}
 	hash, _ := utils.HashPassword(req.Password)
@@ -666,8 +667,8 @@ func ExportUsers(c *gin.Context) {
 	var rows []ExportRow
 	repository.DB.Raw(`
 		SELECT u.id AS user_id, u.nickname,
-			COALESCE((SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.seller_id=u.id AND o.status=2 AND DATE(o.confirm_time)=CURDATE()), 0) AS today_sell_total,
-			COALESCE((SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.buyer_id=u.id AND o.status=2 AND DATE(o.confirm_time)=CURDATE()), 0) AS today_buy_total,
+			COALESCE((SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.seller_id=u.id AND o.status IN (0,1,2) AND DATE(o.created_at)=CURDATE()), 0) AS today_sell_total,
+			COALESCE((SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.buyer_id=u.id AND o.status IN (0,1,2) AND DATE(o.created_at)=CURDATE()), 0) AS today_buy_total,
 			COALESCE(u.pid,0) AS parent_id,
 			COALESCE((SELECT p.nickname FROM users p WHERE p.id=u.pid), '') AS parent_nickname
 		FROM users u

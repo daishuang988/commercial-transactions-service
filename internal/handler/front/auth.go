@@ -316,11 +316,11 @@ func RegisterV2(c *gin.Context) {
 		Sex:       0,
 		Avatar:    "/assets/img/avatar.png",
 		Invite:    myInvite,
-		Level:     0,
+		Level:     0, // 新用户默认普通用户
 		Status:    1,
 		PID:       parent.ID,
 		IsResell:  1,
-		MaxOrder:     1,
+		MaxOrder:     0, // 新用户默认不可抢单，管理端配置 max_order 后才放开
 		JoinTime:  &now,
 		CreatedAt: now,
 		UpdatedAt: now,
