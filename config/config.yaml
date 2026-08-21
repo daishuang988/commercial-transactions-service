@@ -26,8 +26,8 @@ jwt:
 sms:
   access_key_id: ""
   access_key_secret: ""
-  sign_name: "河北雄安通瑞辰商贸"
-  template_code: "SMS_511510148"
+  sign_name: ""    # xinqida 自己的签名（待申请，拿到后填写）
+  template_code: "" # xinqida 自己的模板（待申请，拿到后填写）
 
 flash_sale:
   max_per_user: 1
