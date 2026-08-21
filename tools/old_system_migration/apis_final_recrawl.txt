@@ -1,0 +1,8 @@
+# 00:10 后最终全量重爬
+https://api.srdsmgs.com/app/admin/user/select
+https://api.srdsmgs.com/app/admin/order/select
+https://api.srdsmgs.com/app/admin/merchandise/select
+https://api.srdsmgs.com/app/admin/withdraw/select
+https://api.srdsmgs.com/app/admin/coupon-log/select
+https://api.srdsmgs.com/app/admin/selfbonus-log/select
+https://api.srdsmgs.com/app/admin/sharebonus-log/select

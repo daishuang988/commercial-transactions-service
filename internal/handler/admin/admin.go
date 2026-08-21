@@ -508,6 +508,7 @@ func SearchOrders(c *gin.Context) {
 	var req struct {
 		Page         int    `json:"page"`
 		Limit        int    `json:"limit"`
+		Keyword      string `json:"keyword"`
 		OrderSN      string `json:"order_sn"`
 		SellerID     int64  `json:"seller_id"`
 		BuyerID      int64  `json:"buyer_id"`
@@ -527,56 +528,64 @@ func SearchOrders(c *gin.Context) {
 
 	var args []interface{}
 	where := " WHERE 1=1"
+	if req.Keyword != "" {
+		kw := "%" + req.Keyword + "%"
+		where += " AND (o.order_sn LIKE ? OR o.consignee LIKE ? OR o.phone LIKE ?)"
+		args = append(args, kw, kw, kw)
+	}
 	if req.OrderSN != "" {
-		where += " AND order_sn = ?"
+		where += " AND o.order_sn = ?"
 		args = append(args, req.OrderSN)
 	}
 	if req.SellerID > 0 {
-		where += " AND seller_id = ?"
+		where += " AND o.seller_id = ?"
 		args = append(args, req.SellerID)
 	}
 	if req.BuyerID > 0 {
-		where += " AND buyer_id = ?"
+		where += " AND o.buyer_id = ?"
 		args = append(args, req.BuyerID)
 	}
 	if req.Status != nil {
-		where += " AND status = ?"
+		where += " AND o.status = ?"
 		args = append(args, *req.Status)
 	}
 	if req.IsResell != nil {
-		where += " AND is_resell = ?"
+		where += " AND o.is_resell = ?"
 		args = append(args, *req.IsResell)
 	}
 	if req.IsShow != nil {
-		where += " AND is_show = ?"
+		where += " AND o.is_show = ?"
 		args = append(args, *req.IsShow)
 	}
 	if req.BuyStart != "" {
-		where += " AND buy_time >= ?"
+		where += " AND o.buy_time >= ?"
 		args = append(args, padTime(req.BuyStart, false))
 	}
 	if req.BuyEnd != "" {
-		where += " AND buy_time <= ?"
+		where += " AND o.buy_time <= ?"
 		args = append(args, padTime(req.BuyEnd, true))
 	}
 	if req.ConfirmStart != "" {
-		where += " AND confirm_time >= ?"
+		where += " AND o.confirm_time >= ?"
 		args = append(args, padTime(req.ConfirmStart, false))
 	}
 	if req.ConfirmEnd != "" {
-		where += " AND confirm_time <= ?"
+		where += " AND o.confirm_time <= ?"
 		args = append(args, padTime(req.ConfirmEnd, true))
 	}
 
 	args = append(args, req.Limit, (req.Page-1)*req.Limit)
 	var list []map[string]interface{}
 	var count int64
-	countSQL := "SELECT count(*) FROM orders" + where
+	var totalMoney float64
+	countSQL := "SELECT count(*) FROM orders o" + where
+	sumSQL := "SELECT COALESCE(SUM(o.total_money),0) FROM orders o" + where
 	listSQL := "SELECT o.*, bu.nickname as buyer_name, su.nickname as seller_name FROM orders o LEFT JOIN users bu ON o.buyer_id=bu.id LEFT JOIN users su ON o.seller_id=su.id" + where + " ORDER BY o.id DESC LIMIT ? OFFSET ?"
 	repository.DB.Raw(countSQL, args[:len(args)-2]...).Scan(&count)
+	repository.DB.Raw(sumSQL, args[:len(args)-2]...).Scan(&totalMoney)
 	repository.DB.Raw(listSQL, args...).Scan(&list)
 	if list == nil { list = []map[string]interface{}{} }
-	app.OKWithCount(c, list, count)
+	app.OKWithCountAndSum(c, list, count, totalMoney)
 }
 
 // ListOrders 订单列表 GET /api/v1/admin/orders
@@ -650,8 +659,16 @@ func ListGoods(c *gin.Context) {
 			categoryID = &id
 		}
 	}
+	// status 可选：0=下架 1=上架；不传返回全部（管理端需要看到下架商品）
+	var status *int8
+	if v := c.Query("status"); v != "" {
+		var s int8
+		if _, err := fmt.Sscanf(v, "%d", &s); err == nil && (s == 0 || s == 1) {
+			status = &s
+		}
+	}
 	keyword := c.Query("keyword")
-	goods, count, err := repository.ListGoods(page, limit, categoryID, keyword)
+	goods, count, err := repository.ListGoods(page, limit, status, categoryID, keyword)
 	if err != nil {
 		app.InternalError(c, "查询失败")
 		return

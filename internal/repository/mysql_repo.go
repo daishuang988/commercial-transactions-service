@@ -66,11 +66,10 @@ func ListUsers(req model.UserListReq) ([]UserWithWallet, int64, error) {
 	var count int64
 
 	// 资金字段从 user_wallets 直读
-	// 今日/昨日买卖从订单表实时算
-	subTodayBuy := "(SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.buyer_id = u.id AND o.status = 2 AND DATE(o.confirm_time) = CURDATE())"
-	subTodayBuyCnt := "(SELECT COUNT(*) FROM orders o WHERE o.buyer_id = u.id AND o.status = 2 AND DATE(o.confirm_time) = CURDATE())"
-	subTodaySell := "(SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.seller_id = u.id AND o.status = 2 AND DATE(o.confirm_time) = CURDATE())"
-	subYestSellCnt := "(SELECT COUNT(*) FROM orders o WHERE o.seller_id = u.id AND o.status = 2 AND DATE(o.confirm_time) = DATE_SUB(CURDATE(), INTERVAL 1 DAY))"
+	// 今日买卖实时算（下单即算，取消订单除外），昨日卖用存储快照（每天23:59结算时固化）
+	subTodayBuy := "(SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.buyer_id = u.id AND o.status IN (0,1,2) AND DATE(o.created_at) = CURDATE())"
+	subTodayBuyCnt := "(SELECT COUNT(*) FROM orders o WHERE o.buyer_id = u.id AND o.status IN (0,1,2) AND DATE(o.created_at) = CURDATE())"
+	subTodaySell := "(SELECT COALESCE(SUM(o.total_money),0) FROM orders o WHERE o.seller_id = u.id AND o.status IN (0,1,2) AND DATE(o.created_at) = CURDATE())"
 
 	selectSQL := fmt.Sprintf(`u.*,
 		COALESCE(w.money,0) money,
@@ -82,8 +81,8 @@ func ListUsers(req model.UserListReq) ([]UserWithWallet, int64, error) {
 		COALESCE((%s), u.today_buy_total) today_buy_total,
 		COALESCE((%s), u.today_buy_count) today_buy_count,
 		COALESCE((%s), u.today_sell_total) today_sell_total,
-		COALESCE((%s), u.yesterday_sell_count) yesterday_sell_count`,
-		subTodayBuy, subTodayBuyCnt, subTodaySell, subYestSellCnt)
+		u.yesterday_sell_count`,
+		subTodayBuy, subTodayBuyCnt, subTodaySell)
 
 	db := DB.Table("users u").
 		Select(selectSQL).
@@ -146,6 +145,12 @@ func ListOrders(req model.OrderListReq) ([]model.Order, int64, error) {
 		kw := "%" + req.Keyword + "%"
 		db = db.Where("order_sn LIKE ? OR consignee LIKE ? OR phone LIKE ?", kw, kw, kw)
 	}
+	if req.StartTime != "" {
+		db = db.Where("created_at >= ?", req.StartTime)
+	}
+	if req.EndTime != "" {
+		db = db.Where("created_at <= ?", req.EndTime)
+	}
 	db.Count(&count)
 	err := db.Order("id DESC").Offset((req.Page-1)*req.Limit).Limit(req.Limit).Find(&orders).Error
 	return orders, count, err
@@ -185,13 +190,15 @@ type GoodWithCategory struct {
 	CategoryName string `json:"category_name"`
 }
 
-func ListGoods(page, limit int, categoryID *int64, keyword string) ([]GoodWithCategory, int64, error) {
+func ListGoods(page, limit int, status *int8, categoryID *int64, keyword string) ([]GoodWithCategory, int64, error) {
 	var goods []GoodWithCategory
 	var count int64
 
 	base := DB.Table("goods g").Select("g.*, c.title as category_name").
-		Joins("LEFT JOIN categories c ON g.category_id = c.id").
-		Where("g.status = 1")
+		Joins("LEFT JOIN categories c ON g.category_id = c.id")
+	if status != nil {
+		base = base.Where("g.status = ?", *status)
+	}
 
 	if categoryID != nil && *categoryID > 0 {
 		base = base.Where("g.category_id = ?", *categoryID)
